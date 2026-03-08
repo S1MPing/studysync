@@ -1,0 +1,288 @@
+import { db } from "./db";
+import { eq, and, or, sql, desc } from "drizzle-orm";
+import { 
+  users, courses, tutorCourses, availabilities, tutoringSessions, messages, reviews,
+  type User, type UpdateProfileRequest,
+  type Course, type InsertCourse,
+  type TutorCourse, type InsertTutorCourse,
+  type Availability, type InsertAvailability,
+  type TutoringSession, type InsertTutoringSession,
+  type Message, type InsertMessage,
+  type Review, type InsertReview,
+  type TutorSearchQuery
+} from "@shared/schema";
+
+// Helper to map snake_case row_to_json output to camelCase User fields
+function mapUser(row: any): User {
+  return {
+    id: row.id,
+    email: row.email,
+    password: row.password,
+    firstName: row.first_name,
+    lastName: row.last_name,
+    profileImageUrl: row.profile_image_url,
+    role: row.role,
+    university: row.university,
+    level: row.level,
+    major: row.major,
+    bio: row.bio,
+    isVerified: row.is_verified,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+export interface IStorage {
+  // Users
+  getUser(id: string): Promise<User | undefined>;
+  updateUser(id: string, profile: UpdateProfileRequest): Promise<User>;
+  searchTutors(query: TutorSearchQuery): Promise<User[]>;
+  
+  // Courses
+  getAllCourses(query?: string): Promise<Course[]>;
+  createCourse(course: InsertCourse): Promise<Course>;
+  
+  // Tutor Courses
+  getTutorCourses(tutorId: string): Promise<(TutorCourse & { course: Course })[]>;
+  addTutorCourse(data: InsertTutorCourse): Promise<TutorCourse>;
+  removeTutorCourse(id: number, tutorId: string): Promise<void>;
+  
+  // Availabilities
+  getAvailabilities(tutorId: string): Promise<Availability[]>;
+  addAvailability(data: InsertAvailability): Promise<Availability>;
+  removeAvailability(id: number, tutorId: string): Promise<void>;
+  
+  // Sessions
+  getUserSessions(userId: string): Promise<(TutoringSession & { student: User, tutor: User, course: Course })[]>;
+  getSession(id: number): Promise<(TutoringSession & { student: User, tutor: User, course: Course }) | undefined>;
+  createSession(data: InsertTutoringSession): Promise<TutoringSession>;
+  updateSessionStatus(id: number, status: string): Promise<TutoringSession>;
+  
+  // Messages
+  getSessionMessages(sessionId: number): Promise<(Message & { sender: User })[]>;
+  createMessage(data: InsertMessage & { sessionId: number }): Promise<Message>;
+  
+  // Reviews
+  getUserReviews(userId: string): Promise<(Review & { reviewer: User })[]>;
+  createReview(data: InsertReview & { reviewerId: string }): Promise<Review>;
+}
+
+export class DatabaseStorage implements IStorage {
+  // Users
+  async getUser(id: string): Promise<User | undefined> {
+    const [user] = await db.select().from(users).where(eq(users.id, id));
+    return user;
+  }
+
+  async updateUser(id: string, profile: UpdateProfileRequest): Promise<User> {
+    const [user] = await db.update(users)
+      .set({ ...profile, updatedAt: new Date() })
+      .where(eq(users.id, id))
+      .returning();
+    return user;
+  }
+
+  async searchTutors(query: TutorSearchQuery): Promise<User[]> {
+    let conditions = [or(eq(users.role, "tutor"), eq(users.role, "both"))];
+    
+    if (query.university) {
+      conditions.push(eq(users.university, query.university));
+    }
+
+    let q = db.selectDistinct({
+      id: users.id,
+      email: users.email,
+      firstName: users.firstName,
+      lastName: users.lastName,
+      profileImageUrl: users.profileImageUrl,
+      role: users.role,
+      university: users.university,
+      level: users.level,
+      major: users.major,
+      bio: users.bio,
+      isVerified: users.isVerified,
+      createdAt: users.createdAt,
+      updatedAt: users.updatedAt
+    }).from(users);
+
+    if (query.courseId) {
+      q = q.innerJoin(tutorCourses, eq(users.id, tutorCourses.tutorId));
+      conditions.push(eq(tutorCourses.courseId, parseInt(query.courseId)));
+    }
+
+    return await q.where(and(...conditions));
+  }
+
+  // Courses
+  async getAllCourses(query?: string): Promise<Course[]> {
+    if (query) {
+      return await db.select().from(courses).where(
+        or(
+          sql`lower(${courses.code}) like lower(${'%' + query + '%'})`,
+          sql`lower(${courses.name}) like lower(${'%' + query + '%'})`
+        )
+      );
+    }
+    return await db.select().from(courses);
+  }
+
+  async createCourse(course: InsertCourse): Promise<Course> {
+    const [newCourse] = await db.insert(courses).values(course).returning();
+    return newCourse;
+  }
+
+  // Tutor Courses
+  async getTutorCourses(tutorId: string): Promise<(TutorCourse & { course: Course })[]> {
+    const results = await db.select({
+      tutorCourse: tutorCourses,
+      course: courses,
+    })
+    .from(tutorCourses)
+    .innerJoin(courses, eq(tutorCourses.courseId, courses.id))
+    .where(eq(tutorCourses.tutorId, tutorId));
+
+    return results.map(r => ({ ...r.tutorCourse, course: r.course }));
+  }
+
+  async addTutorCourse(data: InsertTutorCourse): Promise<TutorCourse> {
+    const [newTutorCourse] = await db.insert(tutorCourses).values(data).returning();
+    return newTutorCourse;
+  }
+
+  async removeTutorCourse(id: number, tutorId: string): Promise<void> {
+    await db.delete(tutorCourses).where(and(eq(tutorCourses.id, id), eq(tutorCourses.tutorId, tutorId)));
+  }
+
+  // Availabilities
+  async getAvailabilities(tutorId: string): Promise<Availability[]> {
+    return await db.select().from(availabilities).where(eq(availabilities.tutorId, tutorId));
+  }
+
+  async addAvailability(data: InsertAvailability): Promise<Availability> {
+    const [newAvailability] = await db.insert(availabilities).values(data).returning();
+    return newAvailability;
+  }
+
+  async removeAvailability(id: number, tutorId: string): Promise<void> {
+    await db.delete(availabilities).where(and(eq(availabilities.id, id), eq(availabilities.tutorId, tutorId)));
+  }
+
+  // Sessions
+  async getUserSessions(userId: string): Promise<(TutoringSession & { student: User, tutor: User, course: Course })[]> {
+    const results = await db.execute(sql`
+      SELECT
+        ts.*,
+        row_to_json(s.*) AS student,
+        row_to_json(t.*) AS tutor,
+        row_to_json(c.*) AS course
+      FROM tutoring_sessions ts
+      INNER JOIN users s ON ts.student_id = s.id
+      INNER JOIN users t ON ts.tutor_id = t.id
+      INNER JOIN courses c ON ts.course_id = c.id
+      WHERE ts.student_id = ${userId} OR ts.tutor_id = ${userId}
+      ORDER BY ts.date DESC
+    `);
+
+    return (results.rows as any[]).map(r => ({
+      id: r.id,
+      studentId: r.student_id,
+      tutorId: r.tutor_id,
+      courseId: r.course_id,
+      status: r.status,
+      date: r.date,
+      startTime: r.start_time,
+      durationMinutes: r.duration_minutes,
+      notes: r.notes,
+      createdAt: r.created_at,
+      student: mapUser(r.student),
+      tutor: mapUser(r.tutor),
+      course: r.course,
+    }));
+  }
+
+  async getSession(id: number): Promise<(TutoringSession & { student: User, tutor: User, course: Course }) | undefined> {
+    const results = await db.execute(sql`
+      SELECT
+        ts.*,
+        row_to_json(s.*) AS student,
+        row_to_json(t.*) AS tutor,
+        row_to_json(c.*) AS course
+      FROM tutoring_sessions ts
+      INNER JOIN users s ON ts.student_id = s.id
+      INNER JOIN users t ON ts.tutor_id = t.id
+      INNER JOIN courses c ON ts.course_id = c.id
+      WHERE ts.id = ${id}
+    `);
+
+    if (results.rows.length === 0) return undefined;
+    const r = results.rows[0] as any;
+    return {
+      id: r.id,
+      studentId: r.student_id,
+      tutorId: r.tutor_id,
+      courseId: r.course_id,
+      status: r.status,
+      date: r.date,
+      startTime: r.start_time,
+      durationMinutes: r.duration_minutes,
+      notes: r.notes,
+      createdAt: r.created_at,
+      student: mapUser(r.student),
+      tutor: mapUser(r.tutor),
+      course: r.course,
+    };
+  }
+
+  async createSession(data: InsertTutoringSession): Promise<TutoringSession> {
+    const [newSession] = await db.insert(tutoringSessions).values(data).returning();
+    return newSession;
+  }
+
+  async updateSessionStatus(id: number, status: string): Promise<TutoringSession> {
+    const [updatedSession] = await db.update(tutoringSessions)
+      .set({ status })
+      .where(eq(tutoringSessions.id, id))
+      .returning();
+    return updatedSession;
+  }
+
+  // Messages
+  async getSessionMessages(sessionId: number): Promise<(Message & { sender: User })[]> {
+    const results = await db.select({
+      message: messages,
+      sender: users,
+    })
+    .from(messages)
+    .innerJoin(users, eq(messages.senderId, users.id))
+    .where(eq(messages.sessionId, sessionId))
+    .orderBy(messages.createdAt);
+
+    return results.map(r => ({ ...r.message, sender: r.sender }));
+  }
+
+  async createMessage(data: InsertMessage & { sessionId: number }): Promise<Message> {
+    const [newMessage] = await db.insert(messages).values(data).returning();
+    return newMessage;
+  }
+
+  // Reviews
+  async getUserReviews(userId: string): Promise<(Review & { reviewer: User })[]> {
+    const results = await db.select({
+      review: reviews,
+      reviewer: users,
+    })
+    .from(reviews)
+    .innerJoin(users, eq(reviews.reviewerId, users.id))
+    .where(eq(reviews.revieweeId, userId))
+    .orderBy(desc(reviews.createdAt));
+
+    return results.map(r => ({ ...r.review, reviewer: r.reviewer }));
+  }
+
+  async createReview(data: InsertReview & { reviewerId: string }): Promise<Review> {
+    const [newReview] = await db.insert(reviews).values(data).returning();
+    return newReview;
+  }
+}
+
+export const storage = new DatabaseStorage();

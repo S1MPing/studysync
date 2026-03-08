@@ -1,0 +1,80 @@
+### Peer Tutoring Matching Web App: Complete Feature Summary
+
+This is a full summary of all discussed features for your Ghana-focused peer tutoring web app (e.g., for universities like UG, UPSA, KNUST). It connects students needing help with peer tutors in subjects like MATH 121 or ACCT 201. I've included everything from the initial mobile app ideas (adapted to web), the detailed feature list, suggested improvements (e.g., interactive tools, AI), and new additions like time tracking for extra free time. Features are divided into core (MVP), nice-to-have (phase 2), and free vs. premium breakdowns. The app uses tools like Firebase for auth/messaging/notifications, Supabase for alternatives, Paystack/Hubtel for payments (Mobile Money like MTN MoMo, Vodafone Cash), and focuses on low-data options (e.g., voice notes).
+
+#### 1. User Registration & Profile Setup
+- Sign up/login with email + password or Google/Apple (using Firebase Auth).
+- Choose role during signup: Tutor or Student (or both).
+- Profile details: University, current level (100–400), faculty/major, courses taken this semester (dropdown or searchable list based on common Ghanaian curricula).
+- Verification: Scan/upload school ID card as identification; backend verifies (takes about 1 hour; you're the backend for now).
+- Optional: Profile photo, short bio (e.g., “Good at Calculus, available evenings”), rating stars (starts at N/A).
+- Additional: University email verification (e.g., @ug.edu.gh) for extra trust.
+
+#### 2. Subject & Tutor Search / Matching
+- Search bar or filters: Select course/subject (e.g., “ACCT 201 – Financial Accounting”, “MATH 121 – Calculus”).
+- Auto-suggest courses based on common Ghanaian university curricula (UG, UPSA, KNUST, etc.).
+- Show list of available peer tutors who:
+  - Have taken the course and passed (self-reported grade A/B).
+  - Are from the same university (or nearby).
+  - Are online/available now or have set availability slots.
+- Smart matching: Prioritize same university, past ratings, and availability.
+- Suggested addition: AI-powered recommendations (e.g., based on past session success, using Firebase ML).
+
+#### 3. Availability Calendar & Scheduling
+- Tutors set weekly availability (e.g., Mon 6–9 PM, Wed 2–5 PM).
+- Students request a session → tutor gets notification → accepts/declines.
+- Simple calendar view (use Google Calendar API or built-in date picker).
+- Suggested addition: Sync with external calendars or university systems (e.g., Google Classroom for UG).
+
+#### 4. In-App Chat / Communication
+- Real-time chat (Firebase Firestore or Supabase for messaging).
+- Support text, voice notes (important for low data usage in Ghana), image sharing (e.g., screenshot of question), document sending (up to 6 in free tier).
+- Optional short voice/video call integration (Agora or Twilio; start with chat only, add later).
+- Suggested additions:
+  - Interactive tools: Virtual whiteboards (e.g., Excalidraw integration) and screen sharing for sessions (e.g., math explanations).
+  - Session automation: Auto-generate notes/transcripts from chat/voice notes.
+  - "More help" options: Embed free resources like Khan Academy, AI chatbots for quick queries.
+
+#### 5. Rating & Review System
+- After session ends, both student and tutor rate each other (1–5 stars + short comment).
+- Ratings visible on profiles to build trust.
+
+#### 6. Notifications
+- Push notifications: New match request, session reminder, tutor accepted/declined, new message.
+- Use Firebase Cloud Messaging (free and easy).
+
+#### 7. Safety & Verification
+- Report/block users.
+- Secure storage for ID scans with consent prompts.
+- Data privacy: GDPR-inspired policies (e.g., handle user data explicitly, even if not required in Ghana).
+
+#### 8. Analytics and Reporting
+- Basic user analytics for MVP (e.g., popular courses, drop-off rates) using Google Analytics.
+- Admin dashboard (phase 2): View users, moderate reports, analytics (most popular courses, retention).
+
+#### 9. Time Tracking and Rewards
+- Track time spent in the app: More time spent earns extra free session time (e.g., every hour active gives 15 extra free minutes).
+
+#### 10. Nice-to-Have / Phase 2 Features (After MVP & User Feedback)
+- Session History & Receipts: Log past sessions with date, duration, topics discussed, rating given.
+- Progress Tracking: Students mark topics mastered; simple dashboard (e.g., “You improved in 3 topics this month”); AI insights on weak areas.
+- Group Study Mode: Request small group sessions (2–5 students) for revision before exams.
+- Referral & Rewards: Invite friends → earn free premium days or airtime credit.
+- Offline Support: Cache recent chats and profile data for poor internet areas (using service workers).
+- User-Friendly Interface: Mobile responsiveness, dark mode, accessibility (e.g., text-to-speech, high-contrast).
+- Scalability: Handle growth (e.g., 100+ users during exams); test with real students in Accra.
+
+#### Free vs. Premium Features (Freemium Model)
+Use in-app payments via Mobile Money (GH¢20–50/month for premium; integrate Hubtel or Paystack Ghana). Free tier encourages basic use; premium for unlimited access.
+
+| Feature Category | Free Tier Limits | Premium Tier (Unlimited) |
+|------------------|------------------|--------------------------|
+| **Matching & Search** | Basic matching (e.g., limited to 3 searches/day). | Priority matching, unlimited searches. |
+| **Sessions & Chat** | Up to 1 hour 30 minutes total chat/session time per use; cut off until 5 hours later. Limited to 3 sessions/month or 30 min each. | Unlimited session time and number. Ad-free experience. |
+| **Document Sending** | Up to 6 documents per session/day. | Unlimited document sharing. |
+| **Voice Notes & Images** | Basic support (limited by session time). | Unlimited, with priority delivery. |
+| **Notifications** | Basic (e.g., email only if push not set). | Full push notifications. |
+| **Time Tracking Rewards** | Earn extra free time based on app activity (e.g., +15 min per hour active). | Automatic extra perks + rewards like priority in matching. |
+| **Other** | Ads shown; no group study or progress tracking. | Access to phase 2 features early (e.g., group mode, dashboards); no ads. |
+
+This covers every detail discussed—core app flow, Ghana-specific elements, suggested enhancements, and new free/premium specifics. For development: Start with MVP (sections 1–7), use no-code like Bubble.io for prototype, or code with Next.js/Firebase. If you need code snippets or wireframes, let me know!
