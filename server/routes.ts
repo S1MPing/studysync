@@ -9,6 +9,7 @@ import { db } from "./db";
 import { courses, tutoringSessions, users, messages, reviews } from "@shared/schema";
 import { eq, or, and, inArray, sql } from "drizzle-orm";
 import { notifySessionRequest, notifySessionStatus, notifyNewMessage } from "./email";
+import { broadcastToUser } from "./websocket";
 
 export async function registerRoutes(
   httpServer: Server,
@@ -314,6 +315,12 @@ export async function registerRoutes(
           }
         } catch {}
       }
+
+      // Notify both parties via WebSocket so they don't need to refresh
+      try {
+        broadcastToUser(session.studentId, { type: "session-update", sessionId });
+        broadcastToUser(session.tutorId, { type: "session-update", sessionId });
+      } catch {}
 
       res.json(updated);
     } catch (err) {

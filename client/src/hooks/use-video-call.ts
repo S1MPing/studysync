@@ -24,6 +24,48 @@ function formatDuration(secs: number): string {
   return h > 0 ? `${h}:${m}:${s}` : `${m}:${s}`;
 }
 
+function useRingTone(active: boolean) {
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    if (!active) {
+      if (timerRef.current) clearTimeout(timerRef.current);
+      return;
+    }
+
+    let running = true;
+
+    const ring = () => {
+      if (!running) return;
+      try {
+        const ctx = new AudioContext();
+        const gain = ctx.createGain();
+        gain.gain.value = 0.2;
+        gain.connect(ctx.destination);
+        const o1 = ctx.createOscillator();
+        const o2 = ctx.createOscillator();
+        o1.frequency.value = 440;
+        o2.frequency.value = 480;
+        o1.connect(gain);
+        o2.connect(gain);
+        o1.start();
+        o2.start();
+        o1.stop(ctx.currentTime + 0.8);
+        o2.stop(ctx.currentTime + 0.8);
+        setTimeout(() => ctx.close().catch(() => {}), 1000);
+      } catch {}
+      timerRef.current = setTimeout(ring, 3000);
+    };
+
+    ring();
+
+    return () => {
+      running = false;
+      if (timerRef.current) { clearTimeout(timerRef.current); timerRef.current = null; }
+    };
+  }, [active]);
+}
+
 export function useVideoCall(sessionId: number) {
   const [callState, setCallState] = useState<CallState>("idle");
   const [callPhase, setCallPhase] = useState<CallPhase>("calling");
@@ -33,6 +75,9 @@ export function useVideoCall(sessionId: number) {
   const [isVideoOff, setIsVideoOff] = useState(false);
   const [minimized, setMinimized] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Ring tone plays for caller while waiting
+  useRingTone(callState === "waiting");
 
   const pcRef = useRef<RTCPeerConnection | null>(null);
   const localStreamRef = useRef<MediaStream | null>(null);
@@ -107,7 +152,7 @@ export function useVideoCall(sessionId: number) {
     setTimeout(() => setCallState("idle"), 1500);
   }, [cleanup]);
 
-  const startCall = useCallback(async (mode: CallMode = "video") => {
+  const startCall = useCallback(async (mode: CallMode = "video", calleeId?: string, callerName?: string) => {
     cleanup();
     setError(null);
     setCallMode(mode);
@@ -219,7 +264,13 @@ export function useVideoCall(sessionId: number) {
 
         const offer = await pc.createOffer();
         await pc.setLocalDescription(offer);
-        await setDoc(callDoc, { offer: { type: offer.type, sdp: offer.sdp }, mode, ended: false });
+        await setDoc(callDoc, {
+          offer: { type: offer.type, sdp: offer.sdp },
+          mode,
+          ended: false,
+          ...(calleeId ? { calleeId } : {}),
+          ...(callerName ? { callerName } : {}),
+        });
 
         setCallState("waiting");
         setCallPhase("calling");

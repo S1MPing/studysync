@@ -5,12 +5,15 @@ import { useI18n, languageNames, type Language } from "@/lib/i18n";
 import {
   GraduationCap, LayoutDashboard, Search, Calendar,
   LogOut, Loader2, Settings, Bell, Moon, Sun, Monitor,
-  HelpCircle, X, ChevronRight, ChevronDown, Globe, Info, User, Shield, Menu, FolderOpen, TrendingUp
+  HelpCircle, X, ChevronRight, ChevronDown, Globe, Info, User, Shield, Menu, FolderOpen, TrendingUp,
+  Phone, PhoneOff, Video
 } from "lucide-react";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Switch } from "@/components/ui/switch";
 import { motion, AnimatePresence } from "framer-motion";
 import { useQuery } from "@tanstack/react-query";
+import { useIncomingCall } from "@/hooks/use-incoming-call";
+import { useGlobalRealtime } from "@/hooks/use-global-ws";
 
 type ThemeMode = "light" | "dark" | "system";
 
@@ -94,12 +97,52 @@ export function AppLayout({ children }: { children: ReactNode }) {
     } catch { return 0; }
   })();
 
+  const { incomingCall, answerCall, declineCall } = useIncomingCall(user?.id);
+  useGlobalRealtime(user?.id);
+
   if (!user) return <>{children}</>;
   const initials = `${user.firstName?.[0] || ""}${user.lastName?.[0] || ""}`.toUpperCase() || user.email?.charAt(0).toUpperCase() || "?";
   const handleLogout = () => { setSettingsOpen(false); logout(); };
 
   return (
     <div className="min-h-screen flex bg-background">
+      {/* Incoming call overlay */}
+      <AnimatePresence>
+        {incomingCall && (
+          <motion.div
+            initial={{ opacity: 0, y: -20 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -20 }}
+            className="fixed top-4 left-1/2 -translate-x-1/2 z-[100] w-[calc(100%-2rem)] max-w-sm"
+          >
+            <div className="bg-zinc-900 text-white rounded-2xl shadow-2xl p-4 flex items-center gap-3">
+              <div className="w-10 h-10 rounded-full bg-primary/20 flex items-center justify-center shrink-0 animate-pulse">
+                {incomingCall.mode === "video" ? <Video className="w-5 h-5 text-primary" /> : <Phone className="w-5 h-5 text-primary" />}
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="text-xs text-zinc-400">{incomingCall.mode === "video" ? "Incoming video call" : "Incoming audio call"}</p>
+                <p className="font-semibold text-sm truncate">{incomingCall.callerName}</p>
+              </div>
+              <div className="flex gap-2 shrink-0">
+                <button
+                  onClick={() => declineCall()}
+                  className="w-9 h-9 rounded-full bg-red-500 hover:bg-red-600 flex items-center justify-center transition-colors"
+                  title="Decline"
+                >
+                  <PhoneOff className="w-4 h-4 text-white" />
+                </button>
+                <button
+                  onClick={() => answerCall(incomingCall)}
+                  className="w-9 h-9 rounded-full bg-green-500 hover:bg-green-600 flex items-center justify-center transition-colors"
+                  title="Answer"
+                >
+                  <Phone className="w-4 h-4 text-white" />
+                </button>
+              </div>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
       {/* Sidebar */}
       <aside className="hidden md:flex flex-col w-56 shrink-0 border-r border-border/60 bg-card sticky top-0 h-screen">
         <div className="px-4 py-4 border-b border-border/50 flex items-center justify-between">

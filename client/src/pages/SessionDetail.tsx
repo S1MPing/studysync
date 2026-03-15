@@ -30,6 +30,20 @@ export function SessionDetail() {
   const updateStatus = useUpdateSessionStatus();
   const deleteSession = useDeleteSession();
   const call = useVideoCall(sessionId);
+  const startCallRef = useRef(call.startCall);
+  useEffect(() => { startCallRef.current = call.startCall; }, [call.startCall]);
+
+  // Auto-answer when navigated from incoming call notification
+  useEffect(() => {
+    if (!sessionId) return;
+    const params = new URLSearchParams(window.location.search);
+    const answerMode = params.get("answer") as CallMode | null;
+    if (answerMode === "video" || answerMode === "audio") {
+      window.history.replaceState({}, "", `/sessions/${sessionId}`);
+      setTimeout(() => startCallRef.current(answerMode), 600);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sessionId]);
 
   const [content, setContent] = useState("");
   const [recording, setRecording] = useState(false);
@@ -86,6 +100,8 @@ export function SessionDetail() {
   const isTutor = session.tutorId === user?.id;
   const otherPerson = isTutor ? session.student : session.tutor;
   const isInCall = call.callState !== "idle" && call.callState !== "ended";
+  const myName = [user?.firstName, user?.lastName].filter(Boolean).join(" ") || "Unknown";
+  const handleStartCall = (mode: CallMode) => call.startCall(mode, otherPerson?.id, myName);
 
   const handleSend = (e: React.FormEvent) => {
     e.preventDefault();
@@ -540,10 +556,10 @@ export function SessionDetail() {
               </div>
             )}
             <div className="mt-4 pt-4 border-t border-border/50 space-y-2">
-              <Button onClick={() => call.startCall("video")} className="w-full rounded-lg gap-2 text-xs h-9" size="sm" disabled={isInCall}>
+              <Button onClick={() => handleStartCall("video")} className="w-full rounded-lg gap-2 text-xs h-9" size="sm" disabled={isInCall}>
                 <Video className="w-3.5 h-3.5" /> Video Call
               </Button>
-              <Button onClick={() => call.startCall("audio")} variant="outline" className="w-full rounded-lg gap-2 text-xs h-9" size="sm" disabled={isInCall}>
+              <Button onClick={() => handleStartCall("audio")} variant="outline" className="w-full rounded-lg gap-2 text-xs h-9" size="sm" disabled={isInCall}>
                 <Phone className="w-3.5 h-3.5" /> Audio Call
               </Button>
             </div>
@@ -561,10 +577,10 @@ export function SessionDetail() {
             <span className="text-xs font-semibold">{otherPerson?.firstName}</span>
           </div>
           <div className="flex gap-1.5">
-            <button onClick={() => call.startCall("audio")} disabled={isInCall} className="w-7 h-7 rounded-md bg-muted flex items-center justify-center disabled:opacity-40">
+            <button onClick={() => handleStartCall("audio")} disabled={isInCall} className="w-7 h-7 rounded-md bg-muted flex items-center justify-center disabled:opacity-40">
               <Phone className="w-3.5 h-3.5 text-primary" />
             </button>
-            <button onClick={() => call.startCall("video")} disabled={isInCall} className="w-7 h-7 rounded-md bg-primary flex items-center justify-center disabled:opacity-40">
+            <button onClick={() => handleStartCall("video")} disabled={isInCall} className="w-7 h-7 rounded-md bg-primary flex items-center justify-center disabled:opacity-40">
               <Video className="w-3.5 h-3.5 text-white" />
             </button>
           </div>
