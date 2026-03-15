@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm run db:push)",
+      "Bash(npm install nodemailer @types/nodemailer --save)",
+      "Bash(npx tsc --noEmit)"
+    ]
+  }
+}
