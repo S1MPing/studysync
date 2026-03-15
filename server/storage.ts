@@ -57,10 +57,12 @@ export interface IStorage {
   getSession(id: number): Promise<(TutoringSession & { student: User, tutor: User, course: Course }) | undefined>;
   createSession(data: InsertTutoringSession): Promise<TutoringSession>;
   updateSessionStatus(id: number, status: string): Promise<TutoringSession>;
+  deleteSession(id: number, userId: string): Promise<void>;
   
   // Messages
   getSessionMessages(sessionId: number): Promise<(Message & { sender: User })[]>;
   createMessage(data: InsertMessage & { sessionId: number }): Promise<Message>;
+  deleteMessage(id: number, userId: string): Promise<void>;
   
   // Reviews
   getUserReviews(userId: string): Promise<(Review & { reviewer: User })[]>;
@@ -168,19 +170,32 @@ export class DatabaseStorage implements IStorage {
   }
 
   // Sessions
-  async getUserSessions(userId: string): Promise<(TutoringSession & { student: User, tutor: User, course: Course })[]> {
+  async getUserSessions(userId: string): Promise<(TutoringSession & { student: User, tutor: User, course: Course, lastMessage?: any })[]> {
     const results = await db.execute(sql`
       SELECT
         ts.*,
         row_to_json(s.*) AS student,
         row_to_json(t.*) AS tutor,
-        row_to_json(c.*) AS course
+        row_to_json(c.*) AS course,
+        (
+          SELECT json_build_object(
+            'id', m.id,
+            'senderId', m.sender_id,
+            'content', m.content,
+            'type', m.type,
+            'createdAt', m.created_at
+          )
+          FROM messages m
+          WHERE m.session_id = ts.id
+          ORDER BY m.created_at DESC
+          LIMIT 1
+        ) AS last_message
       FROM tutoring_sessions ts
       INNER JOIN users s ON ts.student_id = s.id
       INNER JOIN users t ON ts.tutor_id = t.id
       INNER JOIN courses c ON ts.course_id = c.id
       WHERE ts.student_id = ${userId} OR ts.tutor_id = ${userId}
-      ORDER BY ts.date DESC
+      ORDER BY ts.created_at DESC
     `);
 
     return (results.rows as any[]).map(r => ({
@@ -197,6 +212,7 @@ export class DatabaseStorage implements IStorage {
       student: mapUser(r.student),
       tutor: mapUser(r.tutor),
       course: r.course,
+      lastMessage: r.last_message || null,
     }));
   }
 
@@ -246,6 +262,17 @@ export class DatabaseStorage implements IStorage {
     return updatedSession;
   }
 
+  async deleteSession(id: number, userId: string): Promise<void> {
+    await db
+      .delete(tutoringSessions)
+      .where(
+        and(
+          eq(tutoringSessions.id, id),
+          or(eq(tutoringSessions.studentId, userId), eq(tutoringSessions.tutorId, userId)),
+        ),
+      );
+  }
+
   // Messages
   async getSessionMessages(sessionId: number): Promise<(Message & { sender: User })[]> {
     const results = await db.select({
@@ -263,6 +290,12 @@ export class DatabaseStorage implements IStorage {
   async createMessage(data: InsertMessage & { sessionId: number }): Promise<Message> {
     const [newMessage] = await db.insert(messages).values(data).returning();
     return newMessage;
+  }
+
+  async deleteMessage(id: number, userId: string): Promise<void> {
+    await db
+      .delete(messages)
+      .where(and(eq(messages.id, id), eq(messages.senderId, userId)));
   }
 
   // Reviews

@@ -3,7 +3,7 @@ import { useLocation } from "wouter";
 import { useAuth } from "@/hooks/use-auth";
 import { useUpdateProfile } from "@/hooks/use-users";
 import { useCourses } from "@/hooks/use-courses";
-import { useAddTutorCourse } from "@/hooks/use-tutor";
+import { useAddTutorCourse, useAddAvailability } from "@/hooks/use-tutor";
 import { useQueryClient } from "@tanstack/react-query";
 import { motion } from "framer-motion";
 import { Button } from "@/components/ui/button";
@@ -22,6 +22,7 @@ export function ProfileSetup() {
   const { user } = useAuth();
   const updateProfile = useUpdateProfile();
   const addTutorCourse = useAddTutorCourse();
+  const addAvailability = useAddAvailability();
   const { data: allCourses } = useCourses();
   const queryClient = useQueryClient();
 
@@ -38,6 +39,9 @@ export function ProfileSetup() {
   const [teachingLevels, setTeachingLevels] = useState<string[]>([]);
   const [selectedCourses, setSelectedCourses] = useState<number[]>([]);
   const [addingCourse, setAddingCourse] = useState("");
+  const [availabilitySlots, setAvailabilitySlots] = useState<
+    { id: number; dayOfWeek: number; timeOfDay: "morning" | "afternoon" | "evening" | "night" }
+  >([]);
 
   const [submitting, setSubmitting] = useState(false);
 
@@ -54,6 +58,29 @@ export function ProfileSetup() {
 
   const removeCourse = (id: number) => {
     setSelectedCourses(prev => prev.filter(c => c !== id));
+  };
+
+  const addAvailabilitySlot = (dayOfWeek: number, timeOfDay: "morning" | "afternoon" | "evening" | "night") => {
+    setAvailabilitySlots(prev => {
+      // Avoid exact duplicates
+      if (prev.some(s => s.dayOfWeek === dayOfWeek && s.timeOfDay === timeOfDay)) return prev;
+      return [...prev, { id: Date.now() + Math.random(), dayOfWeek, timeOfDay }];
+    });
+  };
+
+  const removeAvailabilitySlot = (id: number) => {
+    setAvailabilitySlots(prev => prev.filter(s => s.id !== id));
+  };
+
+  const availabilityLabel = (slot: { dayOfWeek: number; timeOfDay: string }) => {
+    const days = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+    const times: Record<string, string> = {
+      morning: "Morning (8am–12pm)",
+      afternoon: "Afternoon (12pm–4pm)",
+      evening: "Evening (4pm–8pm)",
+      night: "Night (8pm–11pm)",
+    };
+    return `${days[slot.dayOfWeek]} · ${times[slot.timeOfDay] || slot.timeOfDay}`;
   };
 
   const handleSubmit = async () => {
@@ -81,11 +108,39 @@ export function ProfileSetup() {
       });
 
       // If tutor, add selected courses
-      if (role === "tutor" && selectedCourses.length > 0) {
-        for (const courseId of selectedCourses) {
-          await new Promise<void>((resolve) => {
-            addTutorCourse.mutate({ courseId }, { onSuccess: () => resolve(), onError: () => resolve() });
-          });
+      if (role === "tutor") {
+        // Add selected courses
+        if (selectedCourses.length > 0) {
+          for (const courseId of selectedCourses) {
+            await new Promise<void>((resolve) => {
+              addTutorCourse.mutate({ courseId }, { onSuccess: () => resolve(), onError: () => resolve() });
+            });
+          }
+        }
+
+        // Add availability slots
+        if (availabilitySlots.length > 0) {
+          for (const slot of availabilitySlots) {
+            // Map time-of-day to concrete start/end times
+            let startTime = "08:00";
+            let endTime = "10:00";
+            if (slot.timeOfDay === "morning") {
+              startTime = "08:00"; endTime = "12:00";
+            } else if (slot.timeOfDay === "afternoon") {
+              startTime = "12:00"; endTime = "16:00";
+            } else if (slot.timeOfDay === "evening") {
+              startTime = "16:00"; endTime = "20:00";
+            } else if (slot.timeOfDay === "night") {
+              startTime = "20:00"; endTime = "23:00";
+            }
+
+            await new Promise<void>((resolve) => {
+              addAvailability.mutate(
+                { dayOfWeek: slot.dayOfWeek, startTime, endTime },
+                { onSuccess: () => resolve(), onError: () => resolve() },
+              );
+            });
+          }
         }
       }
 
@@ -212,6 +267,55 @@ export function ProfileSetup() {
                         </Select>
                         <Button size="sm" variant="outline" className="h-9 rounded-lg text-xs px-3" onClick={addCourse} disabled={!addingCourse}>Add</Button>
                       </div>
+                    </div>
+
+                    {/* Availability */}
+                    <div>
+                      <label className="text-xs font-semibold block mb-2">When are you usually available?</label>
+                      <p className="text-[11px] text-muted-foreground mb-2">
+                        Choose typical times you can teach (morning, afternoon, evening, night). Students can filter by these later.
+                      </p>
+                      <div className="grid grid-cols-2 gap-2 mb-3">
+                        {[0, 1, 2, 3, 4, 5, 6].map((day) => (
+                          <div key={day} className="flex flex-col gap-1 rounded-lg border border-dashed border-border/60 p-2">
+                            <span className="text-[11px] font-medium">
+                              {["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"][day]}
+                            </span>
+                            <div className="flex flex-wrap gap-1">
+                              {["morning", "afternoon", "evening", "night"].map((tod) => (
+                                <button
+                                  key={tod}
+                                  type="button"
+                                  onClick={() => addAvailabilitySlot(day, tod as any)}
+                                  className="px-2 py-0.5 rounded-full border border-border text-[10px] text-muted-foreground hover:border-primary/40"
+                                >
+                                  {tod}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                      {availabilitySlots.length > 0 && (
+                        <div className="flex flex-wrap gap-1.5">
+                          {availabilitySlots.map((slot) => (
+                            <Badge
+                              key={slot.id}
+                              variant="secondary"
+                              className="rounded-md text-[10px] gap-1 pr-1 py-0.5"
+                            >
+                              {availabilityLabel(slot)}
+                              <button
+                                type="button"
+                                onClick={() => removeAvailabilitySlot(slot.id)}
+                                className="hover:text-destructive"
+                              >
+                                <X className="w-3 h-3" />
+                              </button>
+                            </Badge>
+                          ))}
+                        </div>
+                      )}
                     </div>
                   </>
                 )}

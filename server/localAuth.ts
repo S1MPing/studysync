@@ -1,6 +1,6 @@
 import type { Express } from "express";
 import { db } from "./db";
-import { users, passwordResetTokens } from "@shared/schema";
+import { users, passwordResetTokens, auditLogs, blockedUsers, reports, tutorCourses, availabilities, tutoringSessions, messages, reviews } from "@shared/schema";
 import { eq, and } from "drizzle-orm";
 import { z } from "zod";
 import * as crypto from "crypto";
@@ -42,6 +42,32 @@ async function sendEmail(to: string, subject: string, html: string) {
   return res.json();
 }
 
+// Audit log helper
+export async function createAuditLog(data: {
+  userId?: string;
+  action: string;
+  entityType?: string;
+  entityId?: string;
+  details?: any;
+  ipAddress?: string;
+  userAgent?: string;
+}) {
+  try {
+    await db.insert(auditLogs).values({
+      userId: data.userId || null,
+      action: data.action,
+      entityType: data.entityType || null,
+      entityId: data.entityId || null,
+      details: data.details || null,
+      ipAddress: data.ipAddress || null,
+      userAgent: data.userAgent || null,
+    });
+  } catch (e) {
+    // Non-fatal
+    console.error("Audit log error:", e);
+  }
+}
+
 const registerSchema = z.object({
   email: z.string().email("Invalid email"),
   password: z.string().min(6, "Password must be at least 6 characters"),
@@ -61,6 +87,11 @@ const forgotPasswordSchema = z.object({
 const resetPasswordSchema = z.object({
   token: z.string().min(1, "Token is required"),
   password: z.string().min(6, "Password must be at least 6 characters"),
+});
+
+const changePasswordSchema = z.object({
+  currentPassword: z.string().min(1, "Current password is required"),
+  newPassword: z.string().min(6, "New password must be at least 6 characters"),
 });
 
 export function registerLocalAuthRoutes(app: Express): void {
@@ -87,6 +118,15 @@ export function registerLocalAuthRoutes(app: Express): void {
       // Set session
       (req.session as any).userId = user.id;
 
+      await createAuditLog({
+        userId: user.id,
+        action: "user.register",
+        entityType: "user",
+        entityId: user.id,
+        ipAddress: req.ip,
+        userAgent: req.headers["user-agent"],
+      });
+
       // Return user without password
       const { password: _pw, ...safeUser } = user;
       return res.json(safeUser);
@@ -109,6 +149,15 @@ export function registerLocalAuthRoutes(app: Express): void {
         return res.status(401).json({ message: "Invalid email or password" });
       }
 
+      if (user.isBanned) {
+        // Auto-unban if ban has expired
+        if (user.bannedUntil && new Date() > new Date(user.bannedUntil)) {
+          await db.update(users).set({ isBanned: false, bannedUntil: null, banReason: null, updatedAt: new Date() }).where(eq(users.id, user.id));
+        } else {
+          return res.status(403).json({ message: "This account has been suspended." });
+        }
+      }
+
       const valid = verifyPassword(password, user.password);
       if (!valid) {
         return res.status(401).json({ message: "Invalid email or password" });
@@ -116,6 +165,15 @@ export function registerLocalAuthRoutes(app: Express): void {
 
       // Set session
       (req.session as any).userId = user.id;
+
+      await createAuditLog({
+        userId: user.id,
+        action: "user.login",
+        entityType: "user",
+        entityId: user.id,
+        ipAddress: req.ip,
+        userAgent: req.headers["user-agent"],
+      });
 
       const { password: _pw, ...safeUser } = user;
       return res.json(safeUser);
@@ -139,10 +197,161 @@ export function registerLocalAuthRoutes(app: Express): void {
       if (!user) {
         return res.status(401).json({ message: "Unauthorized" });
       }
+      if (user.isBanned) {
+        // Auto-unban if ban has expired
+        if (user.bannedUntil && new Date() > new Date(user.bannedUntil)) {
+          await db.update(users).set({ isBanned: false, bannedUntil: null, banReason: null, updatedAt: new Date() }).where(eq(users.id, userId));
+          const { password: _pw, ...safeUser2 } = (await db.select().from(users).where(eq(users.id, userId)))[0];
+          return res.json(safeUser2);
+        }
+        (req.session as any).destroy?.(() => {});
+        return res.status(403).json({
+          message: "banned",
+          bannedUntil: user.bannedUntil ?? null,
+          banReason: user.banReason ?? null,
+        });
+      }
       const { password: _pw, ...safeUser } = user;
       return res.json(safeUser);
     } catch (err) {
       return res.status(500).json({ message: "Failed to fetch user" });
+    }
+  });
+
+  // Change Password
+  app.post("/api/auth/change-password", isAuthenticated, async (req: any, res) => {
+    try {
+      const { currentPassword, newPassword } = changePasswordSchema.parse(req.body);
+      const [user] = await db.select().from(users).where(eq(users.id, req.userId));
+      if (!user || !user.password) {
+        return res.status(404).json({ message: "User not found" });
+      }
+      const valid = verifyPassword(currentPassword, user.password);
+      if (!valid) {
+        return res.status(400).json({ message: "Current password is incorrect" });
+      }
+      const hashed = hashPassword(newPassword);
+      await db.update(users).set({ password: hashed, updatedAt: new Date() }).where(eq(users.id, req.userId));
+
+      await createAuditLog({
+        userId: req.userId,
+        action: "user.change_password",
+        entityType: "user",
+        entityId: req.userId,
+        ipAddress: req.ip,
+        userAgent: req.headers["user-agent"],
+      });
+
+      return res.json({ message: "Password changed successfully" });
+    } catch (err) {
+      if (err instanceof z.ZodError) {
+        return res.status(400).json({ message: err.errors[0].message });
+      }
+      return res.status(500).json({ message: "Failed to change password" });
+    }
+  });
+
+  // Delete Account
+  app.delete("/api/auth/account", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.userId;
+
+      await createAuditLog({
+        userId,
+        action: "user.delete_account",
+        entityType: "user",
+        entityId: userId,
+        ipAddress: req.ip,
+        userAgent: req.headers["user-agent"],
+      });
+
+      // Delete user — cascade handles related records
+      await db.delete(users).where(eq(users.id, userId));
+
+      req.session.destroy(() => {});
+      return res.json({ message: "Account deleted" });
+    } catch (err) {
+      console.error("Delete account error:", err);
+      return res.status(500).json({ message: "Failed to delete account" });
+    }
+  });
+
+  // Block a user
+  app.post("/api/users/:id/block", isAuthenticated, async (req: any, res) => {
+    try {
+      const blockedId = req.params.id;
+      if (blockedId === req.userId) {
+        return res.status(400).json({ message: "Cannot block yourself" });
+      }
+      // Upsert — ignore duplicates
+      const existing = await db.select().from(blockedUsers)
+        .where(and(eq(blockedUsers.blockerId, req.userId), eq(blockedUsers.blockedId, blockedId)));
+      if (existing.length === 0) {
+        await db.insert(blockedUsers).values({ blockerId: req.userId, blockedId });
+      }
+      await createAuditLog({ userId: req.userId, action: "user.block", entityType: "user", entityId: blockedId, ipAddress: req.ip });
+      return res.json({ message: "User blocked" });
+    } catch (err) {
+      return res.status(500).json({ message: "Failed to block user" });
+    }
+  });
+
+  // Unblock a user
+  app.delete("/api/users/:id/block", isAuthenticated, async (req: any, res) => {
+    try {
+      await db.delete(blockedUsers).where(
+        and(eq(blockedUsers.blockerId, req.userId), eq(blockedUsers.blockedId, req.params.id))
+      );
+      return res.json({ message: "User unblocked" });
+    } catch (err) {
+      return res.status(500).json({ message: "Failed to unblock user" });
+    }
+  });
+
+  // Get my blocked users
+  app.get("/api/users/me/blocked", isAuthenticated, async (req: any, res) => {
+    try {
+      const blocked = await db.select().from(blockedUsers).where(eq(blockedUsers.blockerId, req.userId));
+      return res.json(blocked);
+    } catch (err) {
+      return res.status(500).json({ message: "Failed to fetch blocked users" });
+    }
+  });
+
+  // Report a user
+  app.post("/api/users/:id/report", isAuthenticated, async (req: any, res) => {
+    try {
+      const reportedId = req.params.id;
+      if (reportedId === req.userId) {
+        return res.status(400).json({ message: "Cannot report yourself" });
+      }
+      const { reason, details } = z.object({
+        reason: z.string().min(1),
+        details: z.string().optional(),
+      }).parse(req.body);
+
+      const [report] = await db.insert(reports).values({
+        reporterId: req.userId,
+        reportedId,
+        reason,
+        details: details || null,
+      }).returning();
+
+      await createAuditLog({
+        userId: req.userId,
+        action: "user.report",
+        entityType: "user",
+        entityId: reportedId,
+        details: { reason },
+        ipAddress: req.ip,
+      });
+
+      return res.status(201).json(report);
+    } catch (err) {
+      if (err instanceof z.ZodError) {
+        return res.status(400).json({ message: err.errors[0].message });
+      }
+      return res.status(500).json({ message: "Failed to submit report" });
     }
   });
 
@@ -260,7 +469,11 @@ export function registerLocalAuthRoutes(app: Express): void {
   });
 
   // Logout
-  app.post("/api/auth/logout", (req, res) => {
+  app.post("/api/auth/logout", (req: any, res) => {
+    const userId = (req.session as any)?.userId;
+    if (userId) {
+      createAuditLog({ userId, action: "user.logout", entityType: "user", entityId: userId, ipAddress: req.ip }).catch(() => {});
+    }
     req.session.destroy(() => {
       res.json({ message: "Logged out" });
     });
@@ -273,6 +486,31 @@ export const isAuthenticated = async (req: any, res: any, next: any) => {
   if (!userId) {
     return res.status(401).json({ message: "Unauthorized" });
   }
+  // Check if the user has been banned since they logged in
+  const [user] = await db.select({ isBanned: users.isBanned, bannedUntil: users.bannedUntil, banReason: users.banReason }).from(users).where(eq(users.id, userId));
+  if (user?.isBanned) {
+    // Auto-unban if ban has expired
+    if (user.bannedUntil && new Date() > new Date(user.bannedUntil)) {
+      await db.update(users).set({ isBanned: false, bannedUntil: null, banReason: null, updatedAt: new Date() }).where(eq(users.id, userId));
+    } else {
+      return res.status(403).json({ message: "banned", bannedUntil: user.bannedUntil ?? null, banReason: user.banReason ?? null });
+    }
+  }
   req.userId = userId;
+  next();
+};
+
+// Middleware to check admin
+export const isAdmin = async (req: any, res: any, next: any) => {
+  const userId = (req.session as any)?.userId;
+  if (!userId) {
+    return res.status(401).json({ message: "Unauthorized" });
+  }
+  const [user] = await db.select().from(users).where(eq(users.id, userId));
+  if (!user || !user.isAdmin) {
+    return res.status(403).json({ message: "Forbidden" });
+  }
+  req.userId = userId;
+  req.adminUser = user;
   next();
 };

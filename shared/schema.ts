@@ -28,13 +28,18 @@ export const users = pgTable("users", {
   teachingLevels: text("teaching_levels"), // comma-separated: "100,200,300"
   bio: text("bio"),
   isVerified: boolean("is_verified").default(false),
+  isAdmin: boolean("is_admin").default(false),
+  adminRole: text("admin_role", { enum: ["super-admin", "admin", "editor", "viewer"] }),
+  isBanned: boolean("is_banned").default(false),
+  bannedUntil: timestamp("banned_until"),
+  banReason: text("ban_reason"),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
 });
 
 export const passwordResetTokens = pgTable("password_reset_tokens", {
   id: serial("id").primaryKey(),
-  userId: varchar("user_id").references(() => users.id).notNull(),
+  userId: varchar("user_id").references(() => users.id, { onDelete: "cascade" }).notNull(),
   token: varchar("token").notNull().unique(),
   expiresAt: timestamp("expires_at").notNull(),
   used: boolean("used").default(false),
@@ -43,7 +48,7 @@ export const passwordResetTokens = pgTable("password_reset_tokens", {
 
 export const emailVerificationTokens = pgTable("email_verification_tokens", {
   id: serial("id").primaryKey(),
-  userId: varchar("user_id").references(() => users.id).notNull(),
+  userId: varchar("user_id").references(() => users.id, { onDelete: "cascade" }).notNull(),
   token: varchar("token").notNull().unique(),
   expiresAt: timestamp("expires_at").notNull(),
   used: boolean("used").default(false),
@@ -60,14 +65,14 @@ export const courses = pgTable("courses", {
 
 export const tutorCourses = pgTable("tutor_courses", {
   id: serial("id").primaryKey(),
-  tutorId: varchar("tutor_id").references(() => users.id).notNull(),
-  courseId: integer("course_id").references(() => courses.id).notNull(),
+  tutorId: varchar("tutor_id").references(() => users.id, { onDelete: "cascade" }).notNull(),
+  courseId: integer("course_id").references(() => courses.id, { onDelete: "cascade" }).notNull(),
   grade: text("grade"),
 });
 
 export const availabilities = pgTable("availabilities", {
   id: serial("id").primaryKey(),
-  tutorId: varchar("tutor_id").references(() => users.id).notNull(),
+  tutorId: varchar("tutor_id").references(() => users.id, { onDelete: "cascade" }).notNull(),
   dayOfWeek: integer("day_of_week").notNull(),
   startTime: text("start_time").notNull(),
   endTime: text("end_time").notNull(),
@@ -75,9 +80,9 @@ export const availabilities = pgTable("availabilities", {
 
 export const tutoringSessions = pgTable("tutoring_sessions", {
   id: serial("id").primaryKey(),
-  studentId: varchar("student_id").references(() => users.id).notNull(),
-  tutorId: varchar("tutor_id").references(() => users.id).notNull(),
-  courseId: integer("course_id").references(() => courses.id).notNull(),
+  studentId: varchar("student_id").references(() => users.id, { onDelete: "cascade" }).notNull(),
+  tutorId: varchar("tutor_id").references(() => users.id, { onDelete: "cascade" }).notNull(),
+  courseId: integer("course_id").references(() => courses.id, { onDelete: "cascade" }).notNull(),
   status: text("status", { enum: ["pending", "accepted", "declined", "scheduled", "completed", "cancelled"] }).default("pending"),
   date: timestamp("date"),
   startTime: text("start_time"),
@@ -88,21 +93,50 @@ export const tutoringSessions = pgTable("tutoring_sessions", {
 
 export const messages = pgTable("messages", {
   id: serial("id").primaryKey(),
-  sessionId: integer("session_id").references(() => tutoringSessions.id).notNull(),
-  senderId: varchar("sender_id").references(() => users.id).notNull(),
+  sessionId: integer("session_id").references(() => tutoringSessions.id, { onDelete: "cascade" }).notNull(),
+  senderId: varchar("sender_id").references(() => users.id, { onDelete: "cascade" }).notNull(),
   content: text("content"),
-  type: text("type", { enum: ["text", "voice", "image", "document"] }).default("text"),
+  type: text("type", { enum: ["text", "voice", "image", "document", "video"] }).default("text"),
   fileUrl: text("file_url"),
   createdAt: timestamp("created_at").defaultNow(),
 });
 
 export const reviews = pgTable("reviews", {
   id: serial("id").primaryKey(),
-  sessionId: integer("session_id").references(() => tutoringSessions.id).notNull(),
-  reviewerId: varchar("reviewer_id").references(() => users.id).notNull(),
-  revieweeId: varchar("reviewee_id").references(() => users.id).notNull(),
+  sessionId: integer("session_id").references(() => tutoringSessions.id, { onDelete: "cascade" }).notNull(),
+  reviewerId: varchar("reviewer_id").references(() => users.id, { onDelete: "cascade" }).notNull(),
+  revieweeId: varchar("reviewee_id").references(() => users.id, { onDelete: "cascade" }).notNull(),
   rating: integer("rating").notNull(),
   comment: text("comment"),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export const auditLogs = pgTable("audit_logs", {
+  id: serial("id").primaryKey(),
+  userId: varchar("user_id").references(() => users.id, { onDelete: "set null" }),
+  action: text("action").notNull(), // e.g. "user.login", "session.delete", "admin.ban_user"
+  entityType: text("entity_type"), // e.g. "user", "session", "message"
+  entityId: text("entity_id"),
+  details: jsonb("details"),
+  ipAddress: text("ip_address"),
+  userAgent: text("user_agent"),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export const blockedUsers = pgTable("blocked_users", {
+  id: serial("id").primaryKey(),
+  blockerId: varchar("blocker_id").references(() => users.id, { onDelete: "cascade" }).notNull(),
+  blockedId: varchar("blocked_id").references(() => users.id, { onDelete: "cascade" }).notNull(),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export const reports = pgTable("reports", {
+  id: serial("id").primaryKey(),
+  reporterId: varchar("reporter_id").references(() => users.id, { onDelete: "cascade" }).notNull(),
+  reportedId: varchar("reported_id").references(() => users.id, { onDelete: "cascade" }).notNull(),
+  reason: text("reason").notNull(), // "spam", "harassment", "inappropriate", "fake", "other"
+  details: text("details"),
+  status: text("status", { enum: ["pending", "reviewed", "dismissed", "actioned"] }).default("pending"),
   createdAt: timestamp("created_at").defaultNow(),
 });
 
@@ -114,6 +148,11 @@ export const usersRelations = relations(users, ({ many }) => ({
   sessionsAsTutor: many(tutoringSessions, { relationName: "tutorSessions" }),
   reviewsWritten: many(reviews, { relationName: "reviewer" }),
   reviewsReceived: many(reviews, { relationName: "reviewee" }),
+  auditLogs: many(auditLogs),
+  blocksGiven: many(blockedUsers, { relationName: "blocker" }),
+  blocksReceived: many(blockedUsers, { relationName: "blocked" }),
+  reportsGiven: many(reports, { relationName: "reporter" }),
+  reportsReceived: many(reports, { relationName: "reported" }),
 }));
 
 export const coursesRelations = relations(courses, ({ many }) => ({
@@ -145,6 +184,20 @@ export const reviewsRelations = relations(reviews, ({ one }) => ({
   reviewee: one(users, { fields: [reviews.revieweeId], references: [users.id], relationName: "reviewee" }),
 }));
 
+export const auditLogsRelations = relations(auditLogs, ({ one }) => ({
+  user: one(users, { fields: [auditLogs.userId], references: [users.id] }),
+}));
+
+export const blockedUsersRelations = relations(blockedUsers, ({ one }) => ({
+  blocker: one(users, { fields: [blockedUsers.blockerId], references: [users.id], relationName: "blocker" }),
+  blocked: one(users, { fields: [blockedUsers.blockedId], references: [users.id], relationName: "blocked" }),
+}));
+
+export const reportsRelations = relations(reports, ({ one }) => ({
+  reporter: one(users, { fields: [reports.reporterId], references: [users.id], relationName: "reporter" }),
+  reported: one(users, { fields: [reports.reportedId], references: [users.id], relationName: "reported" }),
+}));
+
 // --- Schemas & Types ---
 export type UpsertUser = typeof users.$inferInsert;
 export type User = typeof users.$inferSelect;
@@ -154,6 +207,9 @@ export type Availability = typeof availabilities.$inferSelect;
 export type TutoringSession = typeof tutoringSessions.$inferSelect;
 export type Message = typeof messages.$inferSelect;
 export type Review = typeof reviews.$inferSelect;
+export type AuditLog = typeof auditLogs.$inferSelect;
+export type BlockedUser = typeof blockedUsers.$inferSelect;
+export type Report = typeof reports.$inferSelect;
 
 export const updateProfileSchema = z.object({
   role: z.enum(["student", "tutor", "both"]).optional(),
@@ -162,6 +218,8 @@ export const updateProfileSchema = z.object({
   major: z.string().optional(),
   teachingLevels: z.string().optional(),
   bio: z.string().optional(),
+  firstName: z.string().optional(),
+  lastName: z.string().optional(),
 });
 export type UpdateProfileRequest = z.infer<typeof updateProfileSchema>;
 

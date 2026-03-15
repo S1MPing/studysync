@@ -1,4 +1,5 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
+import { useLocation } from "wouter";
 import { useAuth } from "@/hooks/use-auth";
 import { useCourses } from "@/hooks/use-courses";
 import { useTutorCourses } from "@/hooks/use-tutor";
@@ -17,7 +18,15 @@ import { useToast } from "@/hooks/use-toast";
 export function FindStudents() {
   const { user } = useAuth();
   const { t } = useI18n();
+  const [, setLocation] = useLocation();
   const [universityFilter, setUniversityFilter] = useState<string>("");
+
+  // Students cannot browse this page — only tutors see incoming requests via Sessions
+  useEffect(() => {
+    if (user && user.role !== "tutor") {
+      setLocation("/dashboard");
+    }
+  }, [user]);
 
   const { data: students, isLoading } = useQuery({
     queryKey: ["/api/users/students", universityFilter],

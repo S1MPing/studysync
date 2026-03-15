@@ -4,9 +4,11 @@ import { storage } from "./storage";
 import { api } from "@shared/routes";
 import { z } from "zod";
 import { registerLocalAuthRoutes, isAuthenticated } from "./localAuth";
+import { registerAdminRoutes } from "./adminRoutes";
 import { db } from "./db";
-import { courses, tutoringSessions, users } from "@shared/schema";
-import { eq } from "drizzle-orm";
+import { courses, tutoringSessions, users, messages, reviews } from "@shared/schema";
+import { eq, or, and, inArray, sql } from "drizzle-orm";
+import { notifySessionRequest, notifySessionStatus, notifyNewMessage } from "./email";
 
 export async function registerRoutes(
   httpServer: Server,
@@ -15,6 +17,9 @@ export async function registerRoutes(
 
   // Register local email/password auth routes
   registerLocalAuthRoutes(app);
+
+  // Register admin routes
+  registerAdminRoutes(app);
 
   // Users
   app.patch(api.users.updateProfile.path, isAuthenticated, async (req: any, res) => {
@@ -34,12 +39,18 @@ export async function registerRoutes(
   app.post("/api/users/me/avatar", isAuthenticated, async (req: any, res) => {
     try {
       const { image } = req.body;
-      if (!image || typeof image !== "string") {
-        return res.status(400).json({ message: "Image data is required" });
+      // Allow clearing the profile image
+      if (image === null || image === "" || image === undefined) {
+        const user = await storage.updateUser(req.userId, { profileImageUrl: null } as any);
+        const { password: _pw, ...safeUser } = user;
+        return res.json(safeUser);
       }
-      // Limit size ~2MB base64
-      if (image.length > 2 * 1024 * 1024 * 1.37) {
-        return res.status(400).json({ message: "Image too large. Max 2MB." });
+      if (typeof image !== "string") {
+        return res.status(400).json({ message: "Invalid image data" });
+      }
+      // Limit size ~7MB binary (base64 overhead ~1.37x)
+      if (image.length > 7 * 1024 * 1024 * 1.37) {
+        return res.status(400).json({ message: "Image too large. Max 7MB." });
       }
       const user = await storage.updateUser(req.userId, { profileImageUrl: image } as any);
       const { password: _pw, ...safeUser } = user;
@@ -85,6 +96,31 @@ export async function registerRoutes(
         ? results.filter(u => u.university === university)
         : results;
       res.json(filtered);
+    } catch (err) {
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  // Search users by name (for report dialog)
+  app.get("/api/users/search", isAuthenticated, async (req: any, res) => {
+    try {
+      const q = (req.query.q as string || "").toLowerCase().trim();
+      if (!q || q.length < 2) return res.json([]);
+      const all = await db.select({
+        id: users.id,
+        firstName: users.firstName,
+        lastName: users.lastName,
+        profileImageUrl: users.profileImageUrl,
+        role: users.role,
+        university: users.university,
+      }).from(users).where(eq(users.isBanned, false));
+      const results = all.filter(u =>
+        u.id !== req.userId &&
+        (`${u.firstName} ${u.lastName}`.toLowerCase().includes(q) ||
+         (u.firstName?.toLowerCase() || "").includes(q) ||
+         (u.lastName?.toLowerCase() || "").includes(q))
+      ).slice(0, 10);
+      res.json(results);
     } catch (err) {
       res.status(500).json({ message: "Internal server error" });
     }
@@ -203,16 +239,37 @@ export async function registerRoutes(
 
   app.post(api.sessions.create.path, isAuthenticated, async (req: any, res) => {
     try {
-      const input = api.sessions.create.input.parse(req.body);
-      
-      // If studentId is provided (tutor offering), use it. Otherwise the requester is the student.
+      const { recurringWeeks, ...rawInput } = req.body;
+      const input = api.sessions.create.input.parse(rawInput);
+
       const sessionData = {
         ...input,
         studentId: input.studentId || req.userId,
         tutorId: input.tutorId || req.userId,
       };
-      
+
       const session = await storage.createSession(sessionData);
+
+      // Create recurring copies if requested (up to 12 weeks)
+      const weeks = Math.min(parseInt(recurringWeeks || "1", 10), 12);
+      if (weeks > 1 && sessionData.date) {
+        for (let w = 1; w < weeks; w++) {
+          const d = new Date(sessionData.date);
+          d.setDate(d.getDate() + w * 7);
+          await storage.createSession({ ...sessionData, date: d });
+        }
+      }
+
+      // Email the tutor about the new request
+      try {
+        const tutor = await storage.getUser(sessionData.tutorId);
+        const student = await storage.getUser(sessionData.studentId);
+        const course = (await db.select().from(courses).where(eq(courses.id, sessionData.courseId!)))[0];
+        if (tutor?.email && student && course) {
+          notifySessionRequest(tutor.email, tutor.firstName || "Tutor", `${student.firstName} ${student.lastName}`, course.code).catch(() => {});
+        }
+      } catch {}
+
       res.status(201).json(session);
     } catch (err) {
       if (err instanceof z.ZodError) {
@@ -246,6 +303,18 @@ export async function registerRoutes(
       }
 
       const updated = await storage.updateSessionStatus(sessionId, input.status);
+
+      // Email the student when tutor accepts/declines
+      if (["accepted", "declined"].includes(input.status)) {
+        try {
+          const student = await storage.getUser(session.studentId);
+          const course = (await db.select().from(courses).where(eq(courses.id, session.courseId)))[0];
+          if (student?.email && course) {
+            notifySessionStatus(student.email, student.firstName || "Student", input.status, course.code, session.tutor?.firstName || "Tutor").catch(() => {});
+          }
+        } catch {}
+      }
+
       res.json(updated);
     } catch (err) {
       if (err instanceof z.ZodError) {
@@ -295,6 +364,31 @@ export async function registerRoutes(
     }
   });
 
+  // Delete a session (only participants; typically after completion/cancellation)
+  app.delete(api.sessions.delete.path, isAuthenticated, async (req: any, res) => {
+    try {
+      const sessionId = parseInt(req.params.id);
+      const session = await storage.getSession(sessionId);
+
+      if (!session) {
+        return res.status(404).json({ message: "Session not found" });
+      }
+
+      if (session.studentId !== req.userId && session.tutorId !== req.userId) {
+        return res.status(401).json({ message: "Unauthorized" });
+      }
+
+      if (!["completed", "cancelled", "declined"].includes(session.status)) {
+        return res.status(400).json({ message: "Only completed or cancelled sessions can be deleted" });
+      }
+
+      await storage.deleteSession(sessionId, req.userId);
+      res.status(204).end();
+    } catch (err) {
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
   // Messages
   app.get(api.messages.list.path, isAuthenticated, async (req: any, res) => {
     try {
@@ -329,17 +423,127 @@ export async function registerRoutes(
         return res.status(401).json({ message: "Unauthorized" });
       }
 
-      const input = api.messages.send.input.parse(req.body);
+      // Allow larger fileUrl for documents/videos/images (up to ~50MB base64)
+      const { fileUrl, ...rest } = req.body;
+      if (fileUrl && typeof fileUrl === "string" && fileUrl.length > 50 * 1024 * 1024 * 1.37) {
+        return res.status(413).json({ message: "File too large. Max 50MB." });
+      }
+
+      const input = api.messages.send.input.parse({ ...rest, fileUrl });
       const message = await storage.createMessage({
         ...input,
         sessionId,
         senderId: req.userId,
       });
+
+      // Email the other party (throttled — only for text messages to avoid spam)
+      if (input.type === "text") {
+        try {
+          const otherId = session.studentId === req.userId ? session.tutorId : session.studentId;
+          const other = await storage.getUser(otherId);
+          const sender = await storage.getUser(req.userId);
+          const course = (await db.select().from(courses).where(eq(courses.id, session.courseId)))[0];
+          if (other?.email && sender && course) {
+            notifyNewMessage(other.email, other.firstName || "", `${sender.firstName} ${sender.lastName}`, course.code).catch(() => {});
+          }
+        } catch {}
+      }
+
       res.status(201).json(message);
     } catch (err) {
       if (err instanceof z.ZodError) {
         return res.status(400).json({ message: err.errors[0].message });
       }
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  app.delete(api.messages.delete.path, isAuthenticated, async (req: any, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      // Ensure message exists and belongs to a session the user is in
+      const msgList = await db.select().from(messages).where(eq(messages.id, id));
+      if (!msgList[0]) {
+        return res.status(404).json({ message: "Message not found" });
+      }
+      const msg = msgList[0];
+      const session = await storage.getSession(msg.sessionId);
+      if (!session) {
+        return res.status(404).json({ message: "Session not found" });
+      }
+      if (session.studentId !== req.userId && session.tutorId !== req.userId) {
+        return res.status(401).json({ message: "Unauthorized" });
+      }
+
+      await storage.deleteMessage(id, req.userId);
+      res.status(204).end();
+    } catch (err) {
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  // Update session notes
+  app.patch("/api/sessions/:id/notes", isAuthenticated, async (req: any, res) => {
+    try {
+      const sessionId = parseInt(req.params.id);
+      const session = await storage.getSession(sessionId);
+      if (!session) return res.status(404).json({ message: "Session not found" });
+      if (session.studentId !== req.userId && session.tutorId !== req.userId) return res.status(401).json({ message: "Unauthorized" });
+      const { notes } = z.object({ notes: z.string().max(2000) }).parse(req.body);
+      const [updated] = await db.update(tutoringSessions).set({ notes }).where(eq(tutoringSessions.id, sessionId)).returning();
+      res.json(updated);
+    } catch (err) {
+      if (err instanceof z.ZodError) return res.status(400).json({ message: err.errors[0].message });
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  // Get all file messages for the current user's sessions (media gallery)
+  app.get("/api/messages/files", isAuthenticated, async (req: any, res) => {
+    try {
+      const userSessions = await storage.getUserSessions(req.userId);
+      const sessionIds = userSessions.map(s => s.id);
+      if (sessionIds.length === 0) return res.json([]);
+
+      const fileMessages = await db.execute(sql`
+        SELECT m.*,
+          json_build_object('id', u.id, 'firstName', u.first_name, 'lastName', u.last_name, 'profileImageUrl', u.profile_image_url) AS sender,
+          json_build_object('id', c.id, 'code', c.code, 'name', c.name) AS course
+        FROM messages m
+        INNER JOIN users u ON m.sender_id = u.id
+        INNER JOIN tutoring_sessions ts ON m.session_id = ts.id
+        INNER JOIN courses c ON ts.course_id = c.id
+        WHERE m.type IN ('image', 'video', 'document')
+          AND m.session_id = ANY(${sessionIds})
+        ORDER BY m.created_at DESC
+        LIMIT 200
+      `);
+
+      res.json(fileMessages.rows.map((r: any) => ({
+        id: r.id,
+        sessionId: r.session_id,
+        senderId: r.sender_id,
+        content: r.content,
+        type: r.type,
+        fileUrl: r.file_url,
+        createdAt: r.created_at,
+        sender: r.sender,
+        course: r.course,
+      })));
+    } catch (err) {
+      console.error(err);
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  // Check if user has already reviewed a session
+  app.get("/api/sessions/:id/review-status", isAuthenticated, async (req: any, res) => {
+    try {
+      const sessionId = parseInt(req.params.id);
+      const existing = await db.select().from(reviews)
+        .where(and(eq(reviews.sessionId, sessionId), eq(reviews.reviewerId, req.userId)));
+      res.json({ hasReviewed: existing.length > 0 });
+    } catch (err) {
       res.status(500).json({ message: "Internal server error" });
     }
   });

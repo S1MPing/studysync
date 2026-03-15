@@ -1,24 +1,114 @@
-import { useSessions, useUpdateSessionStatus } from "@/hooks/use-sessions";
+import { useState } from "react";
+import { useSessions, useUpdateSessionStatus, useDeleteSession } from "@/hooks/use-sessions";
 import { useAuth } from "@/hooks/use-auth";
 import { Link } from "wouter";
 import { format } from "date-fns";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
-import { BookOpen, CalendarCheck, Check, X, Loader2, MessageSquare } from "lucide-react";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import { Textarea } from "@/components/ui/textarea";
+import { BookOpen, CalendarCheck, Check, X, Loader2, MessageSquare, PhoneOff, Star } from "lucide-react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useToast } from "@/hooks/use-toast";
 
 export function Sessions() {
   const { user } = useAuth();
   const { data: sessions, isLoading } = useSessions();
   const updateStatus = useUpdateSessionStatus();
+  const deleteSession = useDeleteSession();
+  const { toast } = useToast();
+  const queryClient = useQueryClient();
+  const [reviewSession, setReviewSession] = useState<any | null>(null);
+  const [reviewRating, setReviewRating] = useState(5);
+  const [reviewComment, setReviewComment] = useState("");
+
+  const submitReview = useMutation({
+    mutationFn: async ({ sessionId, revieweeId, rating, comment }: any) => {
+      const res = await fetch(`/api/reviews`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ sessionId, revieweeId, rating, comment }),
+      });
+      if (!res.ok) throw new Error("Failed to submit review");
+      return res.json();
+    },
+    onSuccess: () => {
+      toast({ title: "Review submitted! Thank you." });
+      setReviewSession(null);
+      setReviewRating(5);
+      setReviewComment("");
+      queryClient.invalidateQueries({ queryKey: ["/api/sessions"] });
+    },
+    onError: () => toast({ title: "Failed to submit review", variant: "destructive" }),
+  });
 
   if (isLoading) return <div className="flex justify-center py-20"><Loader2 className="w-8 h-8 animate-spin text-primary" /></div>;
 
-  const learningSessions = sessions?.filter(s => s.studentId === user?.id) || [];
-  const tutoringSessions = sessions?.filter(s => s.tutorId === user?.id) || [];
+  const learningSessions = (sessions?.filter(s => s.studentId === user?.id) || []);
+  const tutoringSessions = (sessions?.filter(s => s.tutorId === user?.id) || []);
 
-  const isTutor = user?.role === "tutor" || user?.role === "both";
+  const isTutorOnly = user?.role === "tutor";
+  const isStudentOnly = user?.role === "student";
+
+  const allForCurrentRole = isTutorOnly ? tutoringSessions : learningSessions;
+
+  // Filters
+  const uniqueTutors = Array.from(
+    new Map(
+      tutoringSessions.map(s => [s.tutorId, s.tutor]),
+    ).values(),
+  );
+  const uniqueCourses = Array.from(
+    new Map(
+      allForCurrentRole
+        .filter(s => s.course)
+        .map(s => [s.courseId, s.course]),
+    ).values(),
+  );
+  const uniqueUniversities = Array.from(
+    new Set(
+      allForCurrentRole
+        .map(s => isTutorOnly ? s.student?.university : s.tutor?.university)
+        .filter(Boolean),
+    ),
+  ) as string[];
+
+  const [tutorFilter, setTutorFilter] = useState<string>("all");
+  const [courseFilter, setCourseFilter] = useState<string>("all");
+  const [universityFilter, setUniversityFilter] = useState<string>("all");
+  const [timeFilter, setTimeFilter] = useState<"all" | "morning" | "afternoon" | "evening" | "night">("all");
+
+  const applyFilters = (list: any[]) =>
+    list.filter((s) => {
+      // Tutor filter (for student view)
+      if (!isTutorOnly && tutorFilter !== "all" && s.tutorId !== tutorFilter) return false;
+      // Course filter
+      if (courseFilter !== "all" && String(s.courseId) !== courseFilter) return false;
+      // University filter (counterparty)
+      const uni = isTutorOnly ? s.student?.university : s.tutor?.university;
+      if (universityFilter !== "all" && uni !== universityFilter) return false;
+      // Time-of-day filter based on startTime (HH:mm) if present
+      if (timeFilter !== "all" && s.startTime) {
+        const [hStr] = s.startTime.split(":");
+        const hour = parseInt(hStr || "0", 10);
+        const tag =
+          hour >= 5 && hour < 12 ? "morning" :
+          hour >= 12 && hour < 17 ? "afternoon" :
+          hour >= 17 && hour < 21 ? "evening" :
+          "night";
+        if (tag !== timeFilter) return false;
+      }
+      return true;
+    });
+
+  const filteredLearning = applyFilters(learningSessions);
+  const filteredTutoring = applyFilters(tutoringSessions);
+
+  const handleDelete = (id: number) => {
+    deleteSession.mutate(id);
+  };
 
   const renderSessionCard = (session: any, isTutorView: boolean) => (
     <Card key={session.id} className="rounded-2xl border-border/50 shadow-sm hover:shadow-md transition-all overflow-hidden mb-4">
@@ -55,6 +145,11 @@ export function Sessions() {
                 </Button>
               </>
             )}
+            {session.status === 'pending' && !isTutorView && (
+              <Button size="sm" variant="outline" onClick={() => updateStatus.mutate({ id: session.id, status: 'cancelled' })} disabled={updateStatus.isPending} className="rounded-lg text-destructive hover:bg-destructive/10 border-destructive/20">
+                <X className="w-4 h-4 mr-1" /> Cancel Request
+              </Button>
+            )}
             
             {(session.status === 'accepted' || session.status === 'completed') && (
               <Link href={`/sessions/${session.id}`}>
@@ -64,6 +159,36 @@ export function Sessions() {
                 </Button>
               </Link>
             )}
+
+            {(session.status === "accepted" || session.status === "scheduled") && (
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => updateStatus.mutate({ id: session.id, status: "cancelled" })}
+                disabled={updateStatus.isPending}
+                className="rounded-lg text-destructive hover:bg-destructive/10 border-destructive/20"
+              >
+                <PhoneOff className="w-4 h-4 mr-1" /> End / Cancel
+              </Button>
+            )}
+
+            {session.status === "completed" && (
+              <Button size="sm" variant="outline" className="rounded-lg border-amber-300 text-amber-700 hover:bg-amber-50 dark:border-amber-700 dark:text-amber-400"
+                onClick={() => { setReviewSession(session); setReviewRating(5); setReviewComment(""); }}>
+                <Star className="w-3.5 h-3.5 mr-1 fill-amber-400 text-amber-400" /> Leave Review
+              </Button>
+            )}
+            {["completed", "cancelled", "declined"].includes(session.status) && (
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => handleDelete(session.id)}
+                disabled={deleteSession.isPending}
+                className="rounded-lg text-destructive hover:bg-destructive/10 border-destructive/20"
+              >
+                Delete
+              </Button>
+            )}
           </div>
         </div>
       </CardContent>
@@ -72,33 +197,130 @@ export function Sessions() {
 
   return (
     <div className="max-w-4xl mx-auto w-full space-y-8 pb-12">
-      <div className="mb-8">
-        <h1 className="text-3xl md:text-4xl font-display font-bold">My Sessions</h1>
-        <p className="text-muted-foreground mt-2">Manage your scheduled tutoring and learning appointments.</p>
+      <div className="mb-8 space-y-4">
+        <div>
+          <h1 className="text-3xl md:text-4xl font-display font-bold">My Sessions</h1>
+          <p className="text-muted-foreground mt-2">
+            {isTutorOnly ? "View and manage sessions you are teaching." : "View and manage sessions where you are learning."}
+          </p>
+        </div>
+
+        {/* Filters */}
+        <div className="flex flex-wrap gap-3 items-center">
+          {!isTutorOnly && uniqueTutors.length > 0 && (
+            <select
+              className="h-9 px-3 rounded-lg border border-border bg-background text-sm"
+              value={tutorFilter}
+              onChange={(e) => setTutorFilter(e.target.value)}
+            >
+              <option value="all">All tutors</option>
+              {uniqueTutors.map((t: any) => (
+                <option key={t.id} value={t.id}>
+                  {t.firstName} {t.lastName}
+                </option>
+              ))}
+            </select>
+          )}
+
+          {uniqueCourses.length > 0 && (
+            <select
+              className="h-9 px-3 rounded-lg border border-border bg-background text-sm"
+              value={courseFilter}
+              onChange={(e) => setCourseFilter(e.target.value)}
+            >
+              <option value="all">All courses</option>
+              {uniqueCourses.map((c: any) => (
+                <option key={c.id} value={c.id}>
+                  {c.code}
+                </option>
+              ))}
+            </select>
+          )}
+
+          {uniqueUniversities.length > 0 && (
+            <select
+              className="h-9 px-3 rounded-lg border border-border bg-background text-sm"
+              value={universityFilter}
+              onChange={(e) => setUniversityFilter(e.target.value)}
+            >
+              <option value="all">All universities</option>
+              {uniqueUniversities.map((u) => (
+                <option key={u} value={u}>
+                  {u}
+                </option>
+              ))}
+            </select>
+          )}
+
+          <select
+            className="h-9 px-3 rounded-lg border border-border bg-background text-sm"
+            value={timeFilter}
+            onChange={(e) => setTimeFilter(e.target.value as any)}
+          >
+            <option value="all">Any time</option>
+            <option value="morning">Morning</option>
+            <option value="afternoon">Afternoon</option>
+            <option value="evening">Evening</option>
+            <option value="night">Night</option>
+          </select>
+        </div>
       </div>
 
-      {!isTutor ? (
+      {/* Role-specific lists */}
+      {isTutorOnly ? (
         <div className="space-y-6">
-          {learningSessions.length > 0 ? learningSessions.map(s => renderSessionCard(s, false)) : <EmptyState />}
+          {filteredTutoring.length > 0 ? filteredTutoring.map(s => renderSessionCard(s, true)) : <EmptyState type="teaching" />}
         </div>
       ) : (
-        <Tabs defaultValue="tutoring" className="w-full">
-          <TabsList className="grid w-full grid-cols-2 h-14 rounded-2xl p-1 bg-muted/50 mb-8">
-            <TabsTrigger value="tutoring" className="rounded-xl text-base font-medium data-[state=active]:bg-card data-[state=active]:shadow-sm">
-              I am Teaching
-            </TabsTrigger>
-            <TabsTrigger value="learning" className="rounded-xl text-base font-medium data-[state=active]:bg-card data-[state=active]:shadow-sm">
-              I am Learning
-            </TabsTrigger>
-          </TabsList>
-          <TabsContent value="tutoring" className="space-y-6">
-            {tutoringSessions.length > 0 ? tutoringSessions.map(s => renderSessionCard(s, true)) : <EmptyState type="teaching" />}
-          </TabsContent>
-          <TabsContent value="learning" className="space-y-6">
-            {learningSessions.length > 0 ? learningSessions.map(s => renderSessionCard(s, false)) : <EmptyState />}
-          </TabsContent>
-        </Tabs>
+        <div className="space-y-6">
+          {filteredLearning.length > 0 ? filteredLearning.map(s => renderSessionCard(s, false)) : <EmptyState />}
+        </div>
       )}
+
+      {/* Review Dialog */}
+      <Dialog open={!!reviewSession} onOpenChange={(open) => !open && setReviewSession(null)}>
+        <DialogContent className="sm:max-w-[400px] rounded-xl p-5">
+          <DialogHeader>
+            <DialogTitle className="text-base">Leave a Review</DialogTitle>
+            {reviewSession && (
+              <p className="text-xs text-muted-foreground mt-1">
+                Rate your session for {reviewSession.course?.code || "this course"}
+              </p>
+            )}
+          </DialogHeader>
+          <div className="space-y-4 mt-2">
+            <div>
+              <p className="text-xs font-semibold mb-2">Rating</p>
+              <div className="flex gap-1.5">
+                {[1,2,3,4,5].map(n => (
+                  <button key={n} type="button" onClick={() => setReviewRating(n)}
+                    className="transition-transform hover:scale-110">
+                    <Star className={`w-7 h-7 ${n <= reviewRating ? "fill-amber-400 text-amber-400" : "text-muted-foreground/30"}`} />
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div className="space-y-1.5">
+              <p className="text-xs font-semibold">Comment (optional)</p>
+              <Textarea className="resize-none rounded-lg text-sm min-h-[80px]"
+                placeholder="Share your experience..."
+                value={reviewComment} onChange={e => setReviewComment(e.target.value)} />
+            </div>
+          </div>
+          <DialogFooter className="mt-4">
+            <Button variant="outline" size="sm" onClick={() => setReviewSession(null)}>Cancel</Button>
+            <Button size="sm" disabled={submitReview.isPending}
+              onClick={() => reviewSession && submitReview.mutate({
+                sessionId: reviewSession.id,
+                revieweeId: user?.id === reviewSession.studentId ? reviewSession.tutorId : reviewSession.studentId,
+                rating: reviewRating,
+                comment: reviewComment || undefined,
+              })}>
+              {submitReview.isPending ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : "Submit Review"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

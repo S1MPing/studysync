@@ -87,3 +87,20 @@ export function useScheduleSession() {
     },
   });
 }
+
+export function useDeleteSession() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (id: number) => {
+      const url = buildUrl(api.sessions.delete.path, { id });
+      const res = await fetch(url, {
+        method: api.sessions.delete.method,
+        credentials: "include",
+      });
+      if (!res.ok && res.status !== 204) throw new Error("Failed to delete session");
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: [api.sessions.list.path] });
+    },
+  });
+}

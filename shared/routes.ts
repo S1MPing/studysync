@@ -165,6 +165,15 @@ export const api = {
         200: z.custom<typeof tutoringSessions.$inferSelect>(),
         401: errorSchemas.unauthorized,
       }
+    },
+    delete: {
+      method: 'DELETE' as const,
+      path: '/api/sessions/:id' as const,
+      responses: {
+        204: z.void(),
+        401: errorSchemas.unauthorized,
+        404: errorSchemas.notFound,
+      },
     }
   },
   messages: {
@@ -184,6 +193,15 @@ export const api = {
         201: z.custom<typeof messages.$inferSelect>(),
         401: errorSchemas.unauthorized,
       }
+    },
+    delete: {
+      method: 'DELETE' as const,
+      path: '/api/messages/:id' as const,
+      responses: {
+        204: z.void(),
+        401: errorSchemas.unauthorized,
+        404: errorSchemas.notFound,
+      },
     }
   },
   reviews: {

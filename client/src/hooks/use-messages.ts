@@ -98,3 +98,20 @@ export function useSendMessage() {
     },
   });
 }
+
+export function useDeleteMessage(sessionId: number) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (id: number) => {
+      const url = buildUrl(api.messages.delete.path, { id });
+      const res = await fetch(url, {
+        method: api.messages.delete.method,
+        credentials: "include",
+      });
+      if (!res.ok && res.status !== 204) throw new Error("Failed to delete message");
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: [api.messages.list.path, sessionId] });
+    },
+  });
+}

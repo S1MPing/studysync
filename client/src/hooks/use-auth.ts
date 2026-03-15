@@ -10,6 +10,12 @@ async function fetchUser(): Promise<User | null> {
     return null;
   }
 
+  if (response.status === 403) {
+    // Account has been banned
+    const data = await response.json().catch(() => ({}));
+    return { isBanned: true, bannedUntil: data.bannedUntil ?? null, banReason: data.banReason ?? null } as any;
+  }
+
   if (!response.ok) {
     throw new Error(`${response.status}: ${response.statusText}`);
   }

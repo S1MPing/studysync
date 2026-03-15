@@ -5,11 +5,12 @@ import { useI18n, languageNames, type Language } from "@/lib/i18n";
 import {
   GraduationCap, LayoutDashboard, Search, Calendar,
   LogOut, Loader2, Settings, Bell, Moon, Sun, Monitor,
-  HelpCircle, X, ChevronRight, ChevronDown, Globe, Info, User
+  HelpCircle, X, ChevronRight, ChevronDown, Globe, Info, User, Shield, Menu, FolderOpen, TrendingUp
 } from "lucide-react";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Switch } from "@/components/ui/switch";
 import { motion, AnimatePresence } from "framer-motion";
+import { useQuery } from "@tanstack/react-query";
 
 type ThemeMode = "light" | "dark" | "system";
 
@@ -45,13 +46,20 @@ export function AppLayout({ children }: { children: ReactNode }) {
   }, [theme]);
 
   const isTutor = user?.role === "tutor";
-  const navItems = [
-    { label: t("nav.dashboard"), href: "/dashboard", icon: LayoutDashboard },
-    isTutor
-      ? { label: t("nav.findStudents") || "Find Students", href: "/students", icon: Search }
-      : { label: t("nav.findTutors"), href: "/tutors", icon: Search },
-    { label: t("nav.sessions"), href: "/sessions", icon: Calendar },
-  ];
+  const navItems = isTutor
+    ? [
+        { label: t("nav.dashboard"), href: "/dashboard", icon: LayoutDashboard },
+        { label: t("nav.sessions"), href: "/sessions", icon: Calendar },
+        { label: "Shared Files", href: "/media", icon: FolderOpen },
+        { label: "My Stats", href: "/progress", icon: TrendingUp },
+      ]
+    : [
+        { label: t("nav.dashboard"), href: "/dashboard", icon: LayoutDashboard },
+        { label: t("nav.findTutors"), href: "/tutors", icon: Search },
+        { label: t("nav.sessions"), href: "/sessions", icon: Calendar },
+        { label: "Shared Files", href: "/media", icon: FolderOpen },
+        { label: "My Progress", href: "/progress", icon: TrendingUp },
+      ];
 
   const themeOptions: { mode: ThemeMode; icon: any; label: string }[] = [
     { mode: "light", icon: Sun, label: t("settings.light") },
@@ -59,6 +67,32 @@ export function AppLayout({ children }: { children: ReactNode }) {
     { mode: "system", icon: Monitor, label: t("settings.system") },
   ];
   const languages: Language[] = ["en", "fr", "de", "es", "tw"];
+
+  // Unread message count from sessions lastMessage + localStorage lastSeen
+  const { data: sessions } = useQuery<any[]>({
+    queryKey: ["/api/sessions"],
+    queryFn: async () => {
+      const res = await fetch("/api/sessions", { credentials: "include" });
+      if (!res.ok) return [];
+      return res.json();
+    },
+    enabled: !!user,
+    refetchInterval: 30_000,
+  });
+
+  const unreadCount = (() => {
+    if (!sessions || !user) return 0;
+    try {
+      const lastSeen: Record<string, string> = JSON.parse(localStorage.getItem("ss_last_seen") || "{}");
+      return sessions.filter((s: any) => {
+        const lm = s.lastMessage;
+        if (!lm || lm.senderId === user.id) return false;
+        const seen = lastSeen[s.id];
+        if (!seen) return true;
+        return new Date(lm.createdAt) > new Date(seen);
+      }).length;
+    } catch { return 0; }
+  })();
 
   if (!user) return <>{children}</>;
   const initials = `${user.firstName?.[0] || ""}${user.lastName?.[0] || ""}`.toUpperCase() || user.email?.charAt(0).toUpperCase() || "?";
@@ -68,20 +102,29 @@ export function AppLayout({ children }: { children: ReactNode }) {
     <div className="min-h-screen flex bg-background">
       {/* Sidebar */}
       <aside className="hidden md:flex flex-col w-56 shrink-0 border-r border-border/60 bg-card sticky top-0 h-screen">
-        <div className="px-4 py-4 border-b border-border/50">
-          <button onClick={() => setSettingsOpen(true)} className="flex items-center gap-2 hover:opacity-80 transition-opacity w-full text-left">
+        <div className="px-4 py-4 border-b border-border/50 flex items-center justify-between">
+          <a href="/" onClick={(e) => { e.preventDefault(); window.location.href = "/"; }} className="flex items-center gap-2 hover:opacity-80 transition-opacity cursor-pointer">
             <img src="/favicon-96x96.png" alt="StudySync" className="w-7 h-7" />
             <span className="text-base font-bold tracking-tight">StudySync</span>
+          </a>
+          <button onClick={() => setSettingsOpen(true)} className="w-7 h-7 rounded-md hover:bg-muted flex items-center justify-center text-muted-foreground" title="Menu">
+            <Menu className="w-4 h-4" />
           </button>
         </div>
         <nav className="flex-1 px-2.5 py-3 space-y-0.5">
           {navItems.map((item) => {
             const active = location.startsWith(item.href);
+            const isSessionsNav = item.href === "/sessions";
             return (
               <Link key={item.href} href={item.href}
-                className={`flex items-center gap-2.5 px-3 py-2 rounded-lg text-[13px] font-medium transition-all
+                className={`flex items-center gap-2.5 px-3 py-2 rounded-lg text-[13px] font-medium transition-all relative
                   ${active ? "bg-primary text-white" : "text-muted-foreground hover:bg-muted hover:text-foreground"}`}>
                 <item.icon className="w-4 h-4 shrink-0" />{item.label}
+                {isSessionsNav && unreadCount > 0 && (
+                  <span className="ml-auto bg-destructive text-white text-[9px] font-bold rounded-full min-w-[16px] h-4 flex items-center justify-center px-1">
+                    {unreadCount > 9 ? "9+" : unreadCount}
+                  </span>
+                )}
               </Link>
             );
           })}
@@ -221,11 +264,29 @@ export function AppLayout({ children }: { children: ReactNode }) {
                     <ChevronRight className="w-3.5 h-3.5 text-muted-foreground" />
                   </div>
                 </Link>
-                <div className="flex items-center gap-2.5 px-3 py-2.5 rounded-lg hover:bg-muted/50 transition-colors cursor-pointer">
-                  <div className="w-7 h-7 rounded-md bg-emerald-500/8 flex items-center justify-center"><HelpCircle className="w-3.5 h-3.5 text-emerald-500" /></div>
-                  <p className="text-xs font-medium flex-1">{t("nav.help")}</p>
-                  <ChevronRight className="w-3.5 h-3.5 text-muted-foreground" />
-                </div>
+                <Link href="/media" onClick={() => setSettingsOpen(false)}>
+                  <div className="flex items-center gap-2.5 px-3 py-2.5 rounded-lg hover:bg-muted/50 transition-colors cursor-pointer">
+                    <div className="w-7 h-7 rounded-md bg-teal-500/8 flex items-center justify-center"><FolderOpen className="w-3.5 h-3.5 text-teal-600" /></div>
+                    <p className="text-xs font-medium flex-1">Shared Files</p>
+                    <ChevronRight className="w-3.5 h-3.5 text-muted-foreground" />
+                  </div>
+                </Link>
+                {(user as any)?.isAdmin && (
+                  <Link href="/admin" onClick={() => setSettingsOpen(false)}>
+                    <div className="flex items-center gap-2.5 px-3 py-2.5 rounded-lg hover:bg-muted/50 transition-colors cursor-pointer">
+                      <div className="w-7 h-7 rounded-md bg-amber-500/8 flex items-center justify-center"><Shield className="w-3.5 h-3.5 text-amber-500" /></div>
+                      <p className="text-xs font-medium flex-1">Admin Panel</p>
+                      <ChevronRight className="w-3.5 h-3.5 text-muted-foreground" />
+                    </div>
+                  </Link>
+                )}
+                <Link href="/help" onClick={() => setSettingsOpen(false)}>
+                  <div className="flex items-center gap-2.5 px-3 py-2.5 rounded-lg hover:bg-muted/50 transition-colors cursor-pointer">
+                    <div className="w-7 h-7 rounded-md bg-emerald-500/8 flex items-center justify-center"><HelpCircle className="w-3.5 h-3.5 text-emerald-500" /></div>
+                    <p className="text-xs font-medium flex-1">{t("nav.help")}</p>
+                    <ChevronRight className="w-3.5 h-3.5 text-muted-foreground" />
+                  </div>
+                </Link>
               </div>
 
               <div className="px-2.5 py-3 border-t border-border/50">
@@ -244,28 +305,43 @@ export function AppLayout({ children }: { children: ReactNode }) {
       <div className="flex-1 flex flex-col min-w-0">
         <header className="md:hidden sticky top-0 z-30 w-full border-b border-border/60 bg-card/90 backdrop-blur-md">
           <div className="px-4 flex items-center justify-between h-12">
-            <Link href="/" className="flex items-center gap-2">
+            <a href="/" onClick={(e) => { e.preventDefault(); window.location.href = "/"; }} className="flex items-center gap-2 cursor-pointer">
               <img src="/favicon-96x96.png" alt="StudySync" className="w-6 h-6" />
               <span className="text-sm font-bold">StudySync</span>
-            </Link>
+            </a>
             <button onClick={() => setSettingsOpen(true)} className="w-7 h-7 rounded-md hover:bg-muted flex items-center justify-center text-muted-foreground">
-              <Settings className="w-4 h-4" />
+              <Menu className="w-4 h-4" />
             </button>
           </div>
         </header>
         <main className="flex-1 px-4 md:px-6 py-6 max-w-5xl w-full mx-auto">{children}</main>
-        <div className="md:hidden fixed bottom-0 left-0 right-0 border-t border-border/60 bg-card/95 backdrop-blur-md pb-safe pt-1.5 px-6 flex justify-around z-30">
+        <div className="md:hidden fixed bottom-0 left-0 right-0 border-t border-border/60 bg-card/95 backdrop-blur-md pb-safe pt-1 px-1 flex justify-around z-30">
           {navItems.map((item) => {
             const active = location.startsWith(item.href);
+            const isSessionsNav = item.href === "/sessions";
+            // Shorten long labels for mobile
+            const mobileLabel = item.label === "Find Tutors" ? "Tutors"
+              : item.label === "Shared Files" ? "Files"
+              : item.label === "My Progress" ? "Progress"
+              : item.label === "My Stats" ? "Stats"
+              : item.label;
             return (
               <Link key={item.href} href={item.href}
-                className={`flex flex-col items-center gap-0.5 py-1 px-3 rounded-lg transition-colors ${active ? "text-primary" : "text-muted-foreground"}`}>
-                <item.icon className="w-4.5 h-4.5" /><span className="text-[9px] font-medium">{item.label}</span>
+                className={`flex flex-col items-center gap-0.5 py-1.5 px-2 rounded-lg transition-colors relative min-w-0 flex-1 max-w-[68px] ${active ? "text-primary" : "text-muted-foreground"}`}>
+                <div className="relative">
+                  <item.icon className="w-[18px] h-[18px]" />
+                  {isSessionsNav && unreadCount > 0 && (
+                    <span className="absolute -top-1 -right-1 bg-destructive text-white text-[7px] font-bold rounded-full min-w-[11px] h-[11px] flex items-center justify-center px-0.5">
+                      {unreadCount > 9 ? "9+" : unreadCount}
+                    </span>
+                  )}
+                </div>
+                <span className="text-[8px] font-medium truncate w-full text-center">{mobileLabel}</span>
               </Link>
             );
           })}
-          <button onClick={() => setSettingsOpen(true)} className="flex flex-col items-center gap-0.5 py-1 px-3 rounded-lg text-muted-foreground">
-            <Settings className="w-4.5 h-4.5" /><span className="text-[9px] font-medium">{t("nav.settings")}</span>
+          <button onClick={() => setSettingsOpen(true)} className="flex flex-col items-center gap-0.5 py-1.5 px-2 rounded-lg text-muted-foreground flex-1 max-w-[68px]">
+            <Settings className="w-[18px] h-[18px]" /><span className="text-[8px] font-medium">More</span>
           </button>
         </div>
       </div>

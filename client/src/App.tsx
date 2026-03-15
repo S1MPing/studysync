@@ -19,17 +19,100 @@ import { ForgotPassword } from "@/pages/ForgotPassword";
 import { ResetPassword } from "@/pages/ResetPassword";
 import { About } from "@/pages/About";
 import { FindStudents } from "@/pages/FindStudents";
+import { Admin } from "@/pages/Admin";
+import { MediaGallery } from "@/pages/MediaGallery";
+import { Help } from "@/pages/Help";
+import { Progress } from "@/pages/Progress";
 import { I18nProvider } from "@/lib/i18n";
 import { useAuth } from "@/hooks/use-auth";
+import { Loader2 } from "lucide-react";
+import { useState, useEffect } from "react";
+
+function BannedScreen({ bannedUntil, banReason }: { bannedUntil?: string | null; banReason?: string | null }) {
+  const [timeLeft, setTimeLeft] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!bannedUntil) return;
+    const target = new Date(bannedUntil).getTime();
+    const update = () => {
+      const diff = target - Date.now();
+      if (diff <= 0) { setTimeLeft(null); window.location.reload(); return; }
+      const d = Math.floor(diff / 86400000);
+      const h = Math.floor((diff % 86400000) / 3600000);
+      const m = Math.floor((diff % 3600000) / 60000);
+      const s = Math.floor((diff % 60000) / 1000);
+      const parts = [];
+      if (d > 0) parts.push(`${d}d`);
+      if (h > 0 || d > 0) parts.push(`${h}h`);
+      if (m > 0 || h > 0 || d > 0) parts.push(`${m}m`);
+      parts.push(`${s}s`);
+      setTimeLeft(parts.join(" "));
+    };
+    update();
+    const id = setInterval(update, 1000);
+    return () => clearInterval(id);
+  }, [bannedUntil]);
+
+  const isPermanent = !bannedUntil;
+
+  return (
+    <div className="min-h-screen flex items-center justify-center bg-background px-4">
+      <div className="max-w-sm w-full text-center space-y-6">
+        <div className="w-16 h-16 rounded-2xl bg-destructive/10 flex items-center justify-center mx-auto">
+          <svg className="w-8 h-8 text-destructive" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+            <circle cx="12" cy="12" r="9" /><line x1="4.93" y1="4.93" x2="19.07" y2="19.07" />
+          </svg>
+        </div>
+        <div className="space-y-2">
+          <h1 className="text-xl font-bold text-destructive">Account Suspended</h1>
+          {banReason && (
+            <p className="text-sm font-medium text-foreground">Reason: {banReason}</p>
+          )}
+          <p className="text-sm text-muted-foreground leading-relaxed">
+            {isPermanent
+              ? "Your account has been permanently suspended for violating our community guidelines."
+              : "Your account has been temporarily suspended."}
+          </p>
+        </div>
+        {!isPermanent && timeLeft && (
+          <div className="rounded-xl border border-destructive/20 bg-destructive/5 px-5 py-4 space-y-1">
+            <p className="text-xs text-muted-foreground">Access restored in</p>
+            <p className="text-2xl font-bold tabular-nums text-destructive">{timeLeft}</p>
+            <p className="text-[10px] text-muted-foreground">Until {new Date(bannedUntil!).toLocaleString()}</p>
+          </div>
+        )}
+        <p className="text-xs text-muted-foreground leading-relaxed">
+          If you believe this is a mistake, contact us at{" "}
+          <a href="mailto:tno.godson@gmail.com" className="underline text-foreground">tno.godson@gmail.com</a>.
+        </p>
+      </div>
+    </div>
+  );
+}
 
 function Router() {
-  const { isAuthenticated, isLoading } = useAuth();
+  const { isAuthenticated, isLoading, user } = useAuth();
+
+  if (isLoading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-background">
+        <div className="flex flex-col items-center gap-4">
+          <Loader2 className="w-12 h-12 animate-spin text-primary" />
+          <p className="text-muted-foreground font-medium animate-pulse">Loading your academic journey...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if ((user as any)?.isBanned) {
+    return <BannedScreen bannedUntil={(user as any).bannedUntil} banReason={(user as any).banReason} />;
+  }
 
   return (
     <Switch>
       {/* Root */}
       <Route path="/">
-        {!isLoading && isAuthenticated ? (
+        {isAuthenticated ? (
           <AuthGuard>
             <AppLayout>
               <Dashboard />
@@ -42,7 +125,15 @@ function Router() {
 
       {/* Auth */}
       <Route path="/auth">
-        <AuthPage />
+        {isAuthenticated ? (
+          <AuthGuard>
+            <AppLayout>
+              <Dashboard />
+            </AppLayout>
+          </AuthGuard>
+        ) : (
+          <AuthPage />
+        )}
       </Route>
 
       {/* Forgot Password */}
@@ -116,6 +207,37 @@ function Router() {
           <AppLayout>
             <About />
           </AppLayout>
+        </AuthGuard>
+      </Route>
+
+      <Route path="/media">
+        <AuthGuard>
+          <AppLayout>
+            <MediaGallery />
+          </AppLayout>
+        </AuthGuard>
+      </Route>
+
+      <Route path="/help">
+        <AuthGuard>
+          <AppLayout>
+            <Help />
+          </AppLayout>
+        </AuthGuard>
+      </Route>
+
+      <Route path="/progress">
+        <AuthGuard>
+          <AppLayout>
+            <Progress />
+          </AppLayout>
+        </AuthGuard>
+      </Route>
+
+      {/* Admin — standalone layout (no AppLayout, has its own dark sidebar) */}
+      <Route path="/admin">
+        <AuthGuard>
+          <Admin />
         </AuthGuard>
       </Route>
 

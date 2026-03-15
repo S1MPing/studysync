@@ -14,9 +14,20 @@ const ICE_SERVERS: RTCConfiguration = {
 
 export type CallState = "idle" | "getting-media" | "waiting" | "connected" | "ended";
 export type CallMode = "video" | "audio";
+// Sub-states for richer UI feedback
+export type CallPhase = "calling" | "ringing" | "e2e" | "live";
+
+function formatDuration(secs: number): string {
+  const h = Math.floor(secs / 3600);
+  const m = Math.floor((secs % 3600) / 60).toString().padStart(2, "0");
+  const s = (secs % 60).toString().padStart(2, "0");
+  return h > 0 ? `${h}:${m}:${s}` : `${m}:${s}`;
+}
 
 export function useVideoCall(sessionId: number) {
   const [callState, setCallState] = useState<CallState>("idle");
+  const [callPhase, setCallPhase] = useState<CallPhase>("calling");
+  const [callDuration, setCallDuration] = useState(0);
   const [callMode, setCallMode] = useState<CallMode>("video");
   const [isMuted, setIsMuted] = useState(false);
   const [isVideoOff, setIsVideoOff] = useState(false);
@@ -28,12 +39,27 @@ export function useVideoCall(sessionId: number) {
   const remoteStreamRef = useRef<MediaStream>(new MediaStream());
   const localVideoRef = useRef<HTMLVideoElement | null>(null);
   const remoteVideoRef = useRef<HTMLVideoElement | null>(null);
+  const remoteAudioRef = useRef<HTMLAudioElement | null>(null);
   const unsubsRef = useRef<(() => void)[]>([]);
   const isCallerRef = useRef(false);
 
+  // Timers
+  const ringingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const noAnswerTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const e2eTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const durationIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
   const roomId = `session-${sessionId}`;
 
+  const clearTimers = useCallback(() => {
+    if (ringingTimerRef.current) { clearTimeout(ringingTimerRef.current); ringingTimerRef.current = null; }
+    if (noAnswerTimerRef.current) { clearTimeout(noAnswerTimerRef.current); noAnswerTimerRef.current = null; }
+    if (e2eTimerRef.current) { clearTimeout(e2eTimerRef.current); e2eTimerRef.current = null; }
+    if (durationIntervalRef.current) { clearInterval(durationIntervalRef.current); durationIntervalRef.current = null; }
+  }, []);
+
   const cleanup = useCallback(() => {
+    clearTimers();
     unsubsRef.current.forEach(u => { try { u(); } catch {} });
     unsubsRef.current = [];
 
@@ -50,59 +76,80 @@ export function useVideoCall(sessionId: number) {
 
     if (localVideoRef.current) localVideoRef.current.srcObject = null;
     if (remoteVideoRef.current) remoteVideoRef.current.srcObject = null;
+    if (remoteAudioRef.current) remoteAudioRef.current.srcObject = null;
     remoteStreamRef.current = new MediaStream();
+  }, [clearTimers]);
+
+  // Called when ICE becomes connected
+  const onCallConnected = useCallback(() => {
+    setCallState("connected");
+    setCallPhase("e2e");
+    setCallDuration(0);
+    // Show "End-to-end encrypted" for 5 seconds, then start timer
+    e2eTimerRef.current = setTimeout(() => {
+      setCallPhase("live");
+      let elapsed = 0;
+      durationIntervalRef.current = setInterval(() => {
+        elapsed += 1;
+        setCallDuration(elapsed);
+      }, 1000);
+    }, 5000);
   }, []);
+
+  const endCallInternal = useCallback(() => {
+    cleanup();
+    setCallState("ended");
+    setCallPhase("calling");
+    setCallDuration(0);
+    setIsMuted(false);
+    setIsVideoOff(false);
+    setMinimized(false);
+    setTimeout(() => setCallState("idle"), 1500);
+  }, [cleanup]);
 
   const startCall = useCallback(async (mode: CallMode = "video") => {
     cleanup();
     setError(null);
     setCallMode(mode);
     setCallState("getting-media");
+    setCallPhase("calling");
+    setCallDuration(0);
     setMinimized(false);
 
     try {
-      // Get camera/mic
       const stream = await navigator.mediaDevices.getUserMedia({
         audio: true,
         video: mode === "video" ? { facingMode: "user" } : false,
       });
       localStreamRef.current = stream;
 
-      // Show local video
       if (localVideoRef.current) {
         localVideoRef.current.srcObject = stream;
       }
 
-      // Create peer connection
       const pc = new RTCPeerConnection(ICE_SERVERS);
       pcRef.current = pc;
 
-      // Add tracks
       stream.getTracks().forEach(track => pc.addTrack(track, stream));
 
-      // Handle remote tracks
       pc.ontrack = (e) => {
         e.streams[0].getTracks().forEach(track => {
           remoteStreamRef.current.addTrack(track);
         });
-        if (remoteVideoRef.current) {
-          remoteVideoRef.current.srcObject = remoteStreamRef.current;
-        }
+        if (remoteVideoRef.current) remoteVideoRef.current.srcObject = remoteStreamRef.current;
+        if (remoteAudioRef.current) remoteAudioRef.current.srcObject = remoteStreamRef.current;
       };
 
-      // Monitor connection
       pc.oniceconnectionstatechange = () => {
         const state = pc.iceConnectionState;
-        console.log("ICE:", state);
         if (state === "connected" || state === "completed") {
-          setCallState("connected");
+          onCallConnected();
         }
         if (state === "failed") {
           setError("Connection failed. Please try again.");
           endCallInternal();
         }
         if (state === "disconnected") {
-          // Give it a moment — might reconnect
           setTimeout(() => {
             if (pcRef.current?.iceConnectionState === "disconnected") {
               endCallInternal();
@@ -111,18 +158,24 @@ export function useVideoCall(sessionId: number) {
         }
       };
 
-      // Firebase signaling
       const callDoc = doc(firestore, "calls", roomId);
       const offerCandidates = collection(callDoc, "offerCandidates");
       const answerCandidates = collection(callDoc, "answerCandidates");
 
-      // Check if a call already exists
-      const existing = await getDoc(callDoc);
+      let existing = await getDoc(callDoc);
+
+      if (existing.exists() && existing.data()?.ended) {
+        try { await deleteDoc(callDoc); } catch {}
+        existing = await getDoc(callDoc);
+      }
+      if (existing.exists() && existing.data()?.offer && existing.data()?.answer) {
+        try { await deleteDoc(callDoc); } catch {}
+        existing = await getDoc(callDoc);
+      }
 
       if (existing.exists() && existing.data()?.offer && !existing.data()?.answer) {
         // ANSWER existing call
         isCallerRef.current = false;
-        console.log("Answering call...");
 
         pc.onicecandidate = (e) => {
           if (e.candidate) addDoc(answerCandidates, e.candidate.toJSON());
@@ -131,9 +184,11 @@ export function useVideoCall(sessionId: number) {
         await pc.setRemoteDescription(new RTCSessionDescription(existing.data()!.offer));
         const answer = await pc.createAnswer();
         await pc.setLocalDescription(answer);
-        await updateDoc(callDoc, { answer: { type: answer.type, sdp: answer.sdp } });
+        await updateDoc(callDoc, {
+          answer: { type: answer.type, sdp: answer.sdp },
+          ended: false,
+        });
 
-        // Listen for offer candidates
         const unsub = onSnapshot(offerCandidates, (snap) => {
           snap.docChanges().forEach((ch) => {
             if (ch.type === "added" && pc.remoteDescription) {
@@ -144,13 +199,12 @@ export function useVideoCall(sessionId: number) {
         unsubsRef.current.push(unsub);
 
         setCallState("connected");
+        onCallConnected();
 
       } else {
         // CREATE new call
         isCallerRef.current = true;
-        console.log("Creating call...");
 
-        // Clean stale data
         try {
           if (existing.exists()) await deleteDoc(callDoc);
           const oldOffer = await getDocs(offerCandidates);
@@ -165,15 +219,33 @@ export function useVideoCall(sessionId: number) {
 
         const offer = await pc.createOffer();
         await pc.setLocalDescription(offer);
-        await setDoc(callDoc, { offer: { type: offer.type, sdp: offer.sdp }, mode });
+        await setDoc(callDoc, { offer: { type: offer.type, sdp: offer.sdp }, mode, ended: false });
 
         setCallState("waiting");
+        setCallPhase("calling");
+
+        // "Calling..." → "Ringing..." after 10s (signal has propagated)
+        ringingTimerRef.current = setTimeout(() => {
+          setCallPhase("ringing");
+        }, 10_000);
+
+        // No answer after 50s → treat as unreachable
+        noAnswerTimerRef.current = setTimeout(() => {
+          if (pcRef.current && pcRef.current.iceConnectionState !== "connected" && pcRef.current.iceConnectionState !== "completed") {
+            setError("No answer. The other person may be offline.");
+            endCallInternal();
+          }
+        }, 50_000);
 
         // Listen for answer
         const unsubCall = onSnapshot(callDoc, (snap) => {
           const data = snap.data();
           if (data?.answer && pc.signalingState !== "closed" && !pc.currentRemoteDescription) {
-            console.log("Got answer!");
+            // Cancel the no-answer timeout — they picked up
+            if (noAnswerTimerRef.current) { clearTimeout(noAnswerTimerRef.current); noAnswerTimerRef.current = null; }
+            if (ringingTimerRef.current) { clearTimeout(ringingTimerRef.current); ringingTimerRef.current = null; }
+            // Switch to ringing immediately when answer comes in
+            setCallPhase("ringing");
             pc.setRemoteDescription(new RTCSessionDescription(data.answer)).catch(console.error);
           }
           if (data?.ended) {
@@ -182,7 +254,6 @@ export function useVideoCall(sessionId: number) {
         });
         unsubsRef.current.push(unsubCall);
 
-        // Listen for answer candidates
         const unsubAC = onSnapshot(answerCandidates, (snap) => {
           snap.docChanges().forEach((ch) => {
             if (ch.type === "added" && pc.remoteDescription) {
@@ -194,7 +265,6 @@ export function useVideoCall(sessionId: number) {
       }
 
     } catch (err: any) {
-      console.error("Call error:", err);
       if (err.name === "NotAllowedError") {
         setError("Camera/microphone access denied. Allow access in your browser settings and try again.");
       } else if (err.name === "NotFoundError") {
@@ -205,19 +275,9 @@ export function useVideoCall(sessionId: number) {
       setCallState("idle");
       cleanup();
     }
-  }, [roomId, cleanup]);
-
-  const endCallInternal = useCallback(() => {
-    cleanup();
-    setCallState("ended");
-    setIsMuted(false);
-    setIsVideoOff(false);
-    setMinimized(false);
-    setTimeout(() => setCallState("idle"), 1500);
-  }, [cleanup]);
+  }, [roomId, cleanup, endCallInternal, onCallConnected]);
 
   const endCall = useCallback(async () => {
-    // Signal other user
     try {
       const callDoc = doc(firestore, "calls", roomId);
       await updateDoc(callDoc, { ended: true }).catch(() => {});
@@ -225,7 +285,6 @@ export function useVideoCall(sessionId: number) {
 
     endCallInternal();
 
-    // Cleanup Firebase after delay
     setTimeout(async () => {
       try {
         const callDoc = doc(firestore, "calls", roomId);
@@ -251,9 +310,11 @@ export function useVideoCall(sessionId: number) {
   useEffect(() => { return () => cleanup(); }, [cleanup]);
 
   return {
-    callState, callMode, isMuted, isVideoOff, minimized, error,
-    localVideoRef, remoteVideoRef,
+    callState, callPhase, callDuration, callMode,
+    isMuted, isVideoOff, minimized, error,
+    localVideoRef, remoteVideoRef, remoteAudioRef,
     startCall, endCall, toggleMute, toggleVideo,
     setMinimized,
+    formatDuration,
   };
 }

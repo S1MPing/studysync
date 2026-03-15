@@ -5,19 +5,51 @@ import { Link } from "wouter";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Calendar, Clock, ArrowRight, UserCheck, CheckCircle2, TrendingUp, BookOpen, Search } from "lucide-react";
-import { format } from "date-fns";
+import { format, differenceInMinutes } from "date-fns";
+import { useEffect, useRef } from "react";
+import { useToast } from "@/hooks/use-toast";
 
 export function Dashboard() {
   const { user } = useAuth();
   const { data: sessions, isLoading } = useSessions();
   const { t } = useI18n();
+  const { toast } = useToast();
+  const remindedRef = useRef<Set<number>>(new Set());
 
-  const upcomingSessions = sessions?.filter(s =>
-    s.status === "accepted" && new Date(s.date) >= new Date()
-  ).sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime()).slice(0, 3) || [];
+  // Session reminder: toast when a session starts in <30 min
+  useEffect(() => {
+    if (!sessions) return;
+    const check = () => {
+      const now = new Date();
+      sessions.forEach((s: any) => {
+        if ((s.status !== "accepted" && s.status !== "scheduled") || !s.date || !s.startTime) return;
+        if (remindedRef.current.has(s.id)) return;
+        const [h, m] = s.startTime.split(":").map(Number);
+        const sessionStart = new Date(s.date);
+        sessionStart.setHours(h, m, 0, 0);
+        const minutesUntil = differenceInMinutes(sessionStart, now);
+        if (minutesUntil >= 0 && minutesUntil <= 30) {
+          remindedRef.current.add(s.id);
+          toast({
+            title: `Session starting in ${minutesUntil} min`,
+            description: `${s.course?.code || "Session"} with ${s.tutorId === user?.id ? s.student?.firstName : s.tutor?.firstName} at ${s.startTime}`,
+          });
+        }
+      });
+    };
+    check();
+    const interval = setInterval(check, 60_000);
+    return () => clearInterval(interval);
+  }, [sessions]);
 
-  const pendingRequests = sessions?.filter(s => s.status === "pending") || [];
-  const completed = sessions?.filter(s => s.status === "completed") || [];
+  const upcomingSessions = sessions?.filter((s: any) =>
+    (s.status === "accepted" || s.status === "scheduled") && s.date && new Date(s.date) >= new Date()
+  ).sort((a: any, b: any) => new Date(a.date).getTime() - new Date(b.date).getTime()).slice(0, 3) || [];
+
+  const pendingRequests = sessions?.filter((s: any) => s.status === "pending") || [];
+  const completed = sessions?.filter((s: any) => s.status === "completed") || [];
+  const totalMinutes = completed.reduce((sum: number, s: any) => sum + (s.durationMinutes || 60), 0);
+  const hoursLearned = (totalMinutes / 60).toFixed(1);
 
   const hour = new Date().getHours();
   const greeting = hour < 12 ? t("dashboard.goodMorning") : hour < 17 ? t("dashboard.goodAfternoon") : t("dashboard.goodEvening");
@@ -40,11 +72,19 @@ export function Dashboard() {
                 : t("dashboard.noUpcomingShort")}
             </p>
           </div>
-          <Link href="/tutors">
-            <Button variant="secondary" className="rounded-lg font-semibold text-sm gap-1.5 shrink-0 shadow-sm">
-              {t("dashboard.findATutor")} <ArrowRight className="w-3.5 h-3.5" />
-            </Button>
-          </Link>
+          {user?.role === "tutor" ? (
+            <Link href="/sessions">
+              <Button variant="secondary" className="rounded-lg font-semibold text-sm gap-1.5 shrink-0 shadow-sm">
+                View Requests <ArrowRight className="w-3.5 h-3.5" />
+              </Button>
+            </Link>
+          ) : (
+            <Link href="/tutors">
+              <Button variant="secondary" className="rounded-lg font-semibold text-sm gap-1.5 shrink-0 shadow-sm">
+                {t("dashboard.findATutor")} <ArrowRight className="w-3.5 h-3.5" />
+              </Button>
+            </Link>
+          )}
         </div>
       </div>
 
@@ -54,7 +94,7 @@ export function Dashboard() {
           { label: t("dashboard.upcoming"), value: upcomingSessions.length, icon: Calendar, color: "text-primary", bg: "bg-primary/8" },
           { label: t("dashboard.pending"), value: pendingRequests.length, icon: Clock, color: "text-amber-600 dark:text-amber-400", bg: "bg-amber-500/8" },
           { label: t("dashboard.completed"), value: completed.length, icon: CheckCircle2, color: "text-emerald-600 dark:text-emerald-400", bg: "bg-emerald-500/8" },
-          { label: t("dashboard.hoursLearned"), value: `${completed.length}h`, icon: TrendingUp, color: "text-blue-600 dark:text-blue-400", bg: "bg-blue-500/8" },
+          { label: t("dashboard.hoursLearned"), value: `${hoursLearned}h`, icon: TrendingUp, color: "text-blue-600 dark:text-blue-400", bg: "bg-blue-500/8" },
         ].map((stat) => (
           <Card key={stat.label} className="rounded-xl border-border/60 shadow-soft">
             <CardContent className="p-4">
@@ -128,10 +168,14 @@ export function Dashboard() {
                   <BookOpen className="w-5 h-5 text-muted-foreground" />
                 </div>
                 <h3 className="font-semibold text-sm mb-1">{t("dashboard.noUpcoming")}</h3>
-                <p className="text-xs text-muted-foreground mb-4">{t("dashboard.noUpcomingDesc")}</p>
-                <Link href="/tutors">
-                  <Button size="sm" className="rounded-lg text-xs px-4">{t("dashboard.browseTutors")}</Button>
-                </Link>
+                <p className="text-xs text-muted-foreground mb-4">
+                  {user?.role === "tutor" ? "No upcoming sessions. Wait for students to send you requests." : t("dashboard.noUpcomingDesc")}
+                </p>
+                {user?.role !== "tutor" && (
+                  <Link href="/tutors">
+                    <Button size="sm" className="rounded-lg text-xs px-4">{t("dashboard.browseTutors")}</Button>
+                  </Link>
+                )}
               </CardContent>
             </Card>
           )}
