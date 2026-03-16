@@ -1,6 +1,18 @@
 node_modules
 dist
 .DS_Store
+Thumbs.db
 server/public
 vite.config.ts.*
 *.tar.gz
+*.log
+npm-debug.log*
+
+# Environment variables — never commit these
+.env
+.env.local
+.env.*.local
+
+# Editor directories
+.vscode/
+.idea/

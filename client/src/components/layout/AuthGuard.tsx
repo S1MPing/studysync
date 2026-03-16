@@ -60,8 +60,11 @@ export function AuthGuard({ children }: { children: ReactNode }) {
 
   if (!user) return null;
 
-  // Profile incomplete → setup (handled by useEffect above)
-  if (!user.role || !user.university) return null;
+  // Profile incomplete → show setup page if already there, otherwise useEffect redirects
+  if (!user.role || !user.university) {
+    if (location === "/setup-profile") return <>{children}</>;
+    return null;
+  }
 
   // Profile complete but not verified → show pending screen
   if (!(user as any).isVerified) {

@@ -76,7 +76,7 @@ export async function registerRoutes(
   });
 
   // Get students (for tutors to browse)
-  app.get("/api/users/students", async (req, res) => {
+  app.get("/api/users/students", isAuthenticated, async (req, res) => {
     try {
       const university = req.query.university as string | undefined;
       let query = db.select({
