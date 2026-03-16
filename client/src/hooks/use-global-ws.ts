@@ -82,6 +82,14 @@ export function useGlobalRealtime(userId: string | undefined, addNotification?: 
                 sessionId: msg.sessionId,
               });
             }
+
+            if (msg.type === "room-invite-notification") {
+              addNotifRef.current?.({
+                type: "session_update",
+                title: "Study Room Invite",
+                body: `${msg.fromName} invited you to join "${msg.roomName}"`,
+              });
+            }
           } catch {}
         };
 

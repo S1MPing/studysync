@@ -28,20 +28,22 @@ import {
   Users,
   Plus,
   Video,
-  ExternalLink,
   Lock,
   Loader2,
   BookOpen,
 } from "lucide-react";
+import { RoomCall } from "@/components/RoomCall";
 
 // ─── Create Room Dialog ───────────────────────────────────────────────────────
 
 function CreateRoomDialog({
   open,
   onClose,
+  onCreated,
 }: {
   open: boolean;
   onClose: () => void;
+  onCreated: (room: StudyRoom) => void;
 }) {
   const { data: courses } = useCourses();
   const createRoom = useCreateRoom();
@@ -77,13 +79,14 @@ function CreateRoomDialog({
       },
       {
         onSuccess: (room) => {
-          // Open Jitsi in new tab automatically
-          window.open(`https://meet.jit.si/${room.jitsiRoomId}`, "_blank", "noopener,noreferrer");
-          toast({ title: "Room created!", description: "Jitsi opened in a new tab." });
+          toast({ title: "Room created!", description: "Joining room..." });
+          onCreated(room);
           handleClose();
         },
-        onError: () =>
-          toast({ title: "Failed to create room", variant: "destructive" }),
+        onError: (err: any) => {
+          const msg = err?.message || "Failed to create room";
+          toast({ title: msg, variant: "destructive" });
+        },
       }
     );
   }
@@ -182,15 +185,7 @@ function CreateRoomDialog({
 
 // ─── Room Card ────────────────────────────────────────────────────────────────
 
-function RoomCard({ room }: { room: StudyRoom }) {
-  function handleJoin() {
-    window.open(
-      `https://meet.jit.si/${room.jitsiRoomId}`,
-      "_blank",
-      "noopener,noreferrer"
-    );
-  }
-
+function RoomCard({ room, onJoin }: { room: StudyRoom; onJoin: (room: StudyRoom) => void }) {
   return (
     <Card className="rounded-xl border-border/60 shadow-sm hover:shadow-md transition-all group">
       <CardContent className="p-5 flex flex-col gap-3">
@@ -241,12 +236,12 @@ function RoomCard({ room }: { room: StudyRoom }) {
         <Button
           size="sm"
           className="w-full gap-2 mt-1"
-          onClick={handleJoin}
+          onClick={() => onJoin(room)}
           disabled={!room.isOpen}
         >
           {room.isOpen ? (
             <>
-              <ExternalLink className="w-3.5 h-3.5" /> Join Room
+              <Video className="w-3.5 h-3.5" /> Join Room
             </>
           ) : (
             <>
@@ -262,11 +257,28 @@ function RoomCard({ room }: { room: StudyRoom }) {
 // ─── Main Rooms Page ──────────────────────────────────────────────────────────
 
 export function Rooms() {
+  const { user } = useAuth();
   const { data: rooms, isLoading, error } = useRooms();
   const [createOpen, setCreateOpen] = useState(false);
+  const [activeRoom, setActiveRoom] = useState<StudyRoom | null>(null);
+
+  const isTutorOrBoth = user && ((user as any).role === "tutor" || (user as any).role === "both");
 
   const openRooms = (rooms || []).filter((r) => r.isOpen);
   const closedRooms = (rooms || []).filter((r) => !r.isOpen);
+
+  // If in a call, show the full-screen call UI
+  if (activeRoom && user) {
+    return (
+      <RoomCall
+        roomId={activeRoom.id}
+        roomName={activeRoom.name}
+        userId={String((user as any).id)}
+        userName={`${(user as any).firstName} ${(user as any).lastName}`}
+        onLeave={() => setActiveRoom(null)}
+      />
+    );
+  }
 
   return (
     <motion.div
@@ -288,9 +300,11 @@ export function Rooms() {
             Join a live study room or create your own
           </p>
         </div>
-        <Button onClick={() => setCreateOpen(true)} className="gap-2 shrink-0">
-          <Plus className="w-4 h-4" /> Create Room
-        </Button>
+        {isTutorOrBoth && (
+          <Button onClick={() => setCreateOpen(true)} className="gap-2 shrink-0">
+            <Plus className="w-4 h-4" /> Create Room
+          </Button>
+        )}
       </div>
 
       {/* Content */}
@@ -315,9 +329,11 @@ export function Rooms() {
           <p className="text-xs text-muted-foreground mt-1 max-w-xs mx-auto">
             Be the first to open a live study room and invite others to join!
           </p>
-          <Button size="sm" className="mt-4 gap-2" onClick={() => setCreateOpen(true)}>
-            <Plus className="w-4 h-4" /> Create Room
-          </Button>
+          {isTutorOrBoth && (
+            <Button size="sm" className="mt-4 gap-2" onClick={() => setCreateOpen(true)}>
+              <Plus className="w-4 h-4" /> Create Room
+            </Button>
+          )}
         </div>
       ) : (
         <div className="space-y-8">
@@ -347,7 +363,7 @@ export function Rooms() {
                     key={room.id}
                     variants={{ hidden: { opacity: 0, y: 10 }, show: { opacity: 1, y: 0 } }}
                   >
-                    <RoomCard room={room} />
+                    <RoomCard room={room} onJoin={setActiveRoom} />
                   </motion.div>
                 ))}
               </motion.div>
@@ -369,7 +385,7 @@ export function Rooms() {
                     key={room.id}
                     variants={{ hidden: { opacity: 0, y: 10 }, show: { opacity: 1, y: 0 } }}
                   >
-                    <RoomCard room={room} />
+                    <RoomCard room={room} onJoin={setActiveRoom} />
                   </motion.div>
                 ))}
               </motion.div>
@@ -379,7 +395,13 @@ export function Rooms() {
       )}
 
       {/* Create Room Dialog */}
-      <CreateRoomDialog open={createOpen} onClose={() => setCreateOpen(false)} />
+      {isTutorOrBoth && (
+        <CreateRoomDialog
+          open={createOpen}
+          onClose={() => setCreateOpen(false)}
+          onCreated={(room) => setActiveRoom(room)}
+        />
+      )}
     </motion.div>
   );
 }

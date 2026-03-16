@@ -10,7 +10,7 @@ import { courses, tutoringSessions, users, messages, reviews, quizzes, flashcard
 import { insertQuizSchema, insertFlashcardSchema, insertStudyRoomSchema } from "@shared/schema";
 import { eq, or, and, inArray, sql, ilike, desc } from "drizzle-orm";
 import { notifySessionRequest, notifySessionStatus, notifyNewMessage } from "./email";
-import { broadcastToUser } from "./websocket";
+import { broadcastToUser, getRoomParticipantIds } from "./websocket";
 
 export async function registerRoutes(
   httpServer: Server,
@@ -782,6 +782,11 @@ export async function registerRoutes(
   // POST /api/rooms - create room
   app.post("/api/rooms", isAuthenticated, async (req: any, res) => {
     try {
+      // Only tutors can create rooms
+      const [creator] = await db.select({ role: users.role }).from(users).where(eq(users.id, req.userId));
+      if (!creator || (creator.role !== "tutor" && creator.role !== "both")) {
+        return res.status(403).json({ message: "Only tutors can create study rooms" });
+      }
       const input = insertStudyRoomSchema.parse(req.body);
       const jitsiRoomId = "studysync-room-" + Math.random().toString(36).slice(2, 10);
       const [room] = await db.insert(studyRooms).values({
@@ -824,6 +829,32 @@ export async function registerRoutes(
       res.status(204).end();
     } catch (err) {
       res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  // GET /api/rooms/:id/invite-candidates — users from accepted sessions (for invite list)
+  app.get("/api/rooms/:id/invite-candidates", isAuthenticated, async (req: any, res) => {
+    try {
+      const results = await db.execute(sql`
+        SELECT DISTINCT
+          CASE WHEN ts.student_id = ${req.userId} THEN ts.tutor_id ELSE ts.student_id END as user_id,
+          CASE WHEN ts.student_id = ${req.userId} THEN t.first_name ELSE s.first_name END as first_name,
+          CASE WHEN ts.student_id = ${req.userId} THEN t.last_name ELSE s.last_name END as last_name,
+          CASE WHEN ts.student_id = ${req.userId} THEN t.profile_image_url ELSE s.profile_image_url END as profile_image_url
+        FROM tutoring_sessions ts
+        INNER JOIN users s ON ts.student_id = s.id
+        INNER JOIN users t ON ts.tutor_id = t.id
+        WHERE (ts.student_id = ${req.userId} OR ts.tutor_id = ${req.userId})
+          AND ts.status = 'accepted'
+      `);
+      res.json(results.rows.map((r: any) => ({
+        id: r.user_id,
+        firstName: r.first_name,
+        lastName: r.last_name,
+        profileImageUrl: r.profile_image_url,
+      })));
+    } catch (err) {
+      res.status(500).json({ message: "Failed to fetch candidates" });
     }
   });
 

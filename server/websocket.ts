@@ -10,8 +10,17 @@ interface ConnectedClient {
 const clients: ConnectedClient[] = [];
 const globalClients = new Map<string, Set<WebSocket>>();
 
+// roomId → (userId → ws)
+const roomParticipants = new Map<string, Map<string, WebSocket>>();
+
 export function getOnlineUserIds(): string[] {
   return Array.from(globalClients.keys());
+}
+
+export function getRoomParticipantIds(roomId: string): string[] {
+  const room = roomParticipants.get(roomId);
+  if (!room) return [];
+  return Array.from(room.keys());
 }
 
 export function broadcastToUser(userId: string, data: object) {
@@ -86,6 +95,100 @@ export function setupWebSocket(server: Server) {
             .filter(c => c.sessionId === client!.sessionId && c.ws !== ws && c.ws.readyState === WebSocket.OPEN)
             .forEach(c => c.ws.send(payload));
         }
+
+        // ── Room WebRTC signaling ──────────────────────────────────────────────
+
+        // Join a study room call
+        if (msg.type === "room-join" && msg.roomId && msg.userId) {
+          const roomId: string = String(msg.roomId);
+          const userId: string = String(msg.userId);
+
+          if (!roomParticipants.has(roomId)) roomParticipants.set(roomId, new Map());
+          const room = roomParticipants.get(roomId)!;
+
+          // Send existing peers to the joiner
+          const existingPeers = Array.from(room.keys());
+          ws.send(JSON.stringify({ type: "room-peers", peers: existingPeers }));
+
+          // Notify existing peers
+          const joinedPayload = JSON.stringify({ type: "room-peer-joined", userId });
+          room.forEach((peerWs) => {
+            if (peerWs.readyState === WebSocket.OPEN) peerWs.send(joinedPayload);
+          });
+
+          room.set(userId, ws);
+          return;
+        }
+
+        // Leave a study room call
+        if (msg.type === "room-leave" && msg.roomId && msg.userId) {
+          const roomId: string = String(msg.roomId);
+          const userId: string = String(msg.userId);
+          const room = roomParticipants.get(roomId);
+          if (room) {
+            room.delete(userId);
+            const leftPayload = JSON.stringify({ type: "room-peer-left", userId });
+            room.forEach((peerWs) => {
+              if (peerWs.readyState === WebSocket.OPEN) peerWs.send(leftPayload);
+            });
+            if (room.size === 0) roomParticipants.delete(roomId);
+          }
+          return;
+        }
+
+        // Relay offer to specific peer
+        if (msg.type === "room-offer" && msg.roomId && msg.toUserId) {
+          const room = roomParticipants.get(String(msg.roomId));
+          const targetWs = room?.get(String(msg.toUserId));
+          if (targetWs?.readyState === WebSocket.OPEN) {
+            targetWs.send(JSON.stringify({
+              type: "room-offer",
+              fromUserId: msg.fromUserId,
+              sdp: msg.sdp,
+            }));
+          }
+          return;
+        }
+
+        // Relay answer to specific peer
+        if (msg.type === "room-answer" && msg.roomId && msg.toUserId) {
+          const room = roomParticipants.get(String(msg.roomId));
+          const targetWs = room?.get(String(msg.toUserId));
+          if (targetWs?.readyState === WebSocket.OPEN) {
+            targetWs.send(JSON.stringify({
+              type: "room-answer",
+              fromUserId: msg.fromUserId,
+              sdp: msg.sdp,
+            }));
+          }
+          return;
+        }
+
+        // Relay ICE candidate to specific peer
+        if (msg.type === "room-ice" && msg.roomId && msg.toUserId) {
+          const room = roomParticipants.get(String(msg.roomId));
+          const targetWs = room?.get(String(msg.toUserId));
+          if (targetWs?.readyState === WebSocket.OPEN) {
+            targetWs.send(JSON.stringify({
+              type: "room-ice",
+              fromUserId: msg.fromUserId,
+              candidate: msg.candidate,
+            }));
+          }
+          return;
+        }
+
+        // Send room invite notification to a user
+        if (msg.type === "room-invite" && msg.toUserId) {
+          broadcastToUser(String(msg.toUserId), {
+            type: "room-invite-notification",
+            fromName: msg.fromName,
+            roomId: msg.roomId,
+            roomName: msg.roomName,
+          });
+          return;
+        }
+
       } catch (err) {
         console.error("WebSocket message error:", err);
       }
@@ -99,6 +202,20 @@ export function setupWebSocket(server: Server) {
       globalClients.forEach((wsSet, uid) => {
         wsSet.delete(ws);
         if (wsSet.size === 0) globalClients.delete(uid);
+      });
+
+      // Remove from room participants and notify peers
+      roomParticipants.forEach((room, roomId) => {
+        room.forEach((peerWs, userId) => {
+          if (peerWs === ws) {
+            room.delete(userId);
+            const leftPayload = JSON.stringify({ type: "room-peer-left", userId });
+            room.forEach((otherWs) => {
+              if (otherWs.readyState === WebSocket.OPEN) otherWs.send(leftPayload);
+            });
+            if (room.size === 0) roomParticipants.delete(roomId);
+          }
+        });
       });
     });
   });
