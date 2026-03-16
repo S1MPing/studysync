@@ -22,6 +22,11 @@ export function Sessions() {
   const [reviewSession, setReviewSession] = useState<any | null>(null);
   const [reviewRating, setReviewRating] = useState(5);
   const [reviewComment, setReviewComment] = useState("");
+  // All filter state must be declared before any early return to satisfy React's rules of hooks
+  const [tutorFilter, setTutorFilter] = useState<string>("all");
+  const [courseFilter, setCourseFilter] = useState<string>("all");
+  const [universityFilter, setUniversityFilter] = useState<string>("all");
+  const [timeFilter, setTimeFilter] = useState<"all" | "morning" | "afternoon" | "evening" | "night">("all");
 
   const submitReview = useMutation({
     mutationFn: async ({ sessionId, revieweeId, rating, comment }: any) => {
@@ -50,7 +55,6 @@ export function Sessions() {
   const tutoringSessions = (sessions?.filter(s => s.tutorId === user?.id) || []);
 
   const isTutorOnly = user?.role === "tutor";
-  const isStudentOnly = user?.role === "student";
 
   const allForCurrentRole = isTutorOnly ? tutoringSessions : learningSessions;
 
@@ -74,11 +78,6 @@ export function Sessions() {
         .filter(Boolean),
     ),
   ) as string[];
-
-  const [tutorFilter, setTutorFilter] = useState<string>("all");
-  const [courseFilter, setCourseFilter] = useState<string>("all");
-  const [universityFilter, setUniversityFilter] = useState<string>("all");
-  const [timeFilter, setTimeFilter] = useState<"all" | "morning" | "afternoon" | "evening" | "night">("all");
 
   const applyFilters = (list: any[]) =>
     list.filter((s) => {
@@ -114,9 +113,15 @@ export function Sessions() {
     <Card key={session.id} className="rounded-2xl border-border/50 shadow-sm hover:shadow-md transition-all overflow-hidden mb-4">
       <CardContent className="p-0 flex flex-col sm:flex-row">
         <div className="bg-muted/40 p-6 flex flex-col justify-center items-center sm:w-32 border-b sm:border-b-0 sm:border-r border-border/50">
-          <span className="text-xs font-bold uppercase text-muted-foreground">{format(new Date(session.date), 'MMM')}</span>
-          <span className="text-3xl font-display font-bold text-foreground">{format(new Date(session.date), 'dd')}</span>
-          <span className="text-xs font-semibold text-muted-foreground mt-1">{session.startTime}</span>
+          {session.date ? (
+            <>
+              <span className="text-xs font-bold uppercase text-muted-foreground">{format(new Date(session.date), 'MMM')}</span>
+              <span className="text-3xl font-display font-bold text-foreground">{format(new Date(session.date), 'dd')}</span>
+            </>
+          ) : (
+            <span className="text-xs font-bold text-muted-foreground">TBD</span>
+          )}
+          <span className="text-xs font-semibold text-muted-foreground mt-1">{session.startTime || '—'}</span>
         </div>
         
         <div className="p-6 flex-1">
