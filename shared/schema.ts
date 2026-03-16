@@ -88,6 +88,8 @@ export const tutoringSessions = pgTable("tutoring_sessions", {
   startTime: text("start_time"),
   durationMinutes: integer("duration_minutes").default(60),
   notes: text("notes"),
+  isRecurring: boolean("is_recurring").default(false),
+  recurringDays: text("recurring_days"), // e.g. "1,3,5" = Mon,Wed,Fri
   createdAt: timestamp("created_at").defaultNow(),
 });
 
@@ -140,8 +142,54 @@ export const reports = pgTable("reports", {
   createdAt: timestamp("created_at").defaultNow(),
 });
 
+export const quizzes = pgTable("quizzes", {
+  id: serial("id").primaryKey(),
+  tutorId: varchar("tutor_id").references(() => users.id, { onDelete: "cascade" }).notNull(),
+  courseId: integer("course_id").references(() => courses.id, { onDelete: "set null" }),
+  title: text("title").notNull(),
+  description: text("description"),
+  isPublic: boolean("is_public").default(true),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export const flashcards = pgTable("flashcards", {
+  id: serial("id").primaryKey(),
+  quizId: integer("quiz_id").references(() => quizzes.id, { onDelete: "cascade" }).notNull(),
+  question: text("question").notNull(),
+  answer: text("answer").notNull(),
+  orderIdx: integer("order_idx").default(0),
+});
+
+export const quizAttempts = pgTable("quiz_attempts", {
+  id: serial("id").primaryKey(),
+  userId: varchar("user_id").references(() => users.id, { onDelete: "cascade" }).notNull(),
+  quizId: integer("quiz_id").references(() => quizzes.id, { onDelete: "cascade" }).notNull(),
+  score: integer("score").notNull(),
+  totalCards: integer("total_cards").notNull(),
+  completedAt: timestamp("completed_at").defaultNow(),
+});
+
+export const studyGoals = pgTable("study_goals", {
+  id: serial("id").primaryKey(),
+  userId: varchar("user_id").references(() => users.id, { onDelete: "cascade" }).notNull().unique(),
+  weeklyHoursTarget: integer("weekly_hours_target").default(10),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+export const studyRooms = pgTable("study_rooms", {
+  id: serial("id").primaryKey(),
+  hostId: varchar("host_id").references(() => users.id, { onDelete: "cascade" }).notNull(),
+  courseId: integer("course_id").references(() => courses.id, { onDelete: "set null" }),
+  name: text("name").notNull(),
+  description: text("description"),
+  maxParticipants: integer("max_participants").default(10),
+  isActive: boolean("is_active").default(true),
+  jitsiRoomId: varchar("jitsi_room_id").notNull(),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
 // --- Relations ---
-export const usersRelations = relations(users, ({ many }) => ({
+export const usersRelations = relations(users, ({ many, one }) => ({
   tutorCourses: many(tutorCourses),
   availabilities: many(availabilities),
   sessionsAsStudent: many(tutoringSessions, { relationName: "studentSessions" }),
@@ -153,11 +201,17 @@ export const usersRelations = relations(users, ({ many }) => ({
   blocksReceived: many(blockedUsers, { relationName: "blocked" }),
   reportsGiven: many(reports, { relationName: "reporter" }),
   reportsReceived: many(reports, { relationName: "reported" }),
+  quizzes: many(quizzes),
+  quizAttempts: many(quizAttempts),
+  studyGoal: one(studyGoals, { fields: [users.id], references: [studyGoals.userId] }),
+  hostedRooms: many(studyRooms),
 }));
 
 export const coursesRelations = relations(courses, ({ many }) => ({
   tutors: many(tutorCourses),
   sessions: many(tutoringSessions),
+  quizzes: many(quizzes),
+  studyRooms: many(studyRooms),
 }));
 
 export const tutorCoursesRelations = relations(tutorCourses, ({ one }) => ({
@@ -196,6 +250,31 @@ export const blockedUsersRelations = relations(blockedUsers, ({ one }) => ({
 export const reportsRelations = relations(reports, ({ one }) => ({
   reporter: one(users, { fields: [reports.reporterId], references: [users.id], relationName: "reporter" }),
   reported: one(users, { fields: [reports.reportedId], references: [users.id], relationName: "reported" }),
+}));
+
+export const quizzesRelations = relations(quizzes, ({ one, many }) => ({
+  tutor: one(users, { fields: [quizzes.tutorId], references: [users.id] }),
+  course: one(courses, { fields: [quizzes.courseId], references: [courses.id] }),
+  flashcards: many(flashcards),
+  attempts: many(quizAttempts),
+}));
+
+export const flashcardsRelations = relations(flashcards, ({ one }) => ({
+  quiz: one(quizzes, { fields: [flashcards.quizId], references: [quizzes.id] }),
+}));
+
+export const quizAttemptsRelations = relations(quizAttempts, ({ one }) => ({
+  user: one(users, { fields: [quizAttempts.userId], references: [users.id] }),
+  quiz: one(quizzes, { fields: [quizAttempts.quizId], references: [quizzes.id] }),
+}));
+
+export const studyGoalsRelations = relations(studyGoals, ({ one }) => ({
+  user: one(users, { fields: [studyGoals.userId], references: [users.id] }),
+}));
+
+export const studyRoomsRelations = relations(studyRooms, ({ one }) => ({
+  host: one(users, { fields: [studyRooms.hostId], references: [users.id] }),
+  course: one(courses, { fields: [studyRooms.courseId], references: [courses.id] }),
 }));
 
 // --- Schemas & Types ---
@@ -261,3 +340,25 @@ export type TutorSearchQuery = {
   courseId?: string;
   university?: string;
 };
+
+export const insertQuizSchema = z.object({
+  courseId: z.number().optional(),
+  title: z.string().min(1),
+  description: z.string().optional(),
+  isPublic: z.boolean().default(true),
+});
+export const insertFlashcardSchema = z.object({
+  question: z.string().min(1),
+  answer: z.string().min(1),
+  orderIdx: z.number().default(0),
+});
+export const insertStudyRoomSchema = z.object({
+  courseId: z.number().optional(),
+  name: z.string().min(1),
+  description: z.string().optional(),
+  maxParticipants: z.number().default(10),
+});
+export type Quiz = typeof quizzes.$inferSelect;
+export type Flashcard = typeof flashcards.$inferSelect;
+export type StudyGoal = typeof studyGoals.$inferSelect;
+export type StudyRoom = typeof studyRooms.$inferSelect;

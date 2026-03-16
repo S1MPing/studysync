@@ -222,7 +222,29 @@ export const api = {
         200: z.array(z.custom<typeof reviews.$inferSelect>()),
       }
     }
-  }
+  },
+  quizzes: {
+    list: { method: 'GET' as const, path: '/api/quizzes' as const },
+    get: { method: 'GET' as const, path: '/api/quizzes/:id' as const },
+    create: { method: 'POST' as const, path: '/api/quizzes' as const },
+    delete: { method: 'DELETE' as const, path: '/api/quizzes/:id' as const },
+    addCard: { method: 'POST' as const, path: '/api/quizzes/:id/cards' as const },
+    deleteCard: { method: 'DELETE' as const, path: '/api/quizzes/cards/:cardId' as const },
+    attempt: { method: 'POST' as const, path: '/api/quizzes/:id/attempt' as const },
+  },
+  rooms: {
+    list: { method: 'GET' as const, path: '/api/rooms' as const },
+    create: { method: 'POST' as const, path: '/api/rooms' as const },
+    close: { method: 'PATCH' as const, path: '/api/rooms/:id/close' as const },
+    delete: { method: 'DELETE' as const, path: '/api/rooms/:id' as const },
+  },
+  goals: {
+    get: { method: 'GET' as const, path: '/api/goals' as const },
+    upsert: { method: 'POST' as const, path: '/api/goals' as const },
+  },
+  search: {
+    query: { method: 'GET' as const, path: '/api/search' as const },
+  },
 };
 
 export function buildUrl(path: string, params?: Record<string, string | number>): string {

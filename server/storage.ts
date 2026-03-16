@@ -25,8 +25,14 @@ function mapUser(row: any): User {
     university: row.university,
     level: row.level,
     major: row.major,
+    teachingLevels: row.teaching_levels ?? null,
     bio: row.bio,
-    isVerified: row.is_verified,
+    isVerified: row.is_verified ?? false,
+    isAdmin: row.is_admin ?? false,
+    adminRole: row.admin_role ?? null,
+    isBanned: row.is_banned ?? false,
+    bannedUntil: row.banned_until ?? null,
+    banReason: row.ban_reason ?? null,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -91,28 +97,13 @@ export class DatabaseStorage implements IStorage {
       conditions.push(eq(users.university, query.university));
     }
 
-    let q = db.selectDistinct({
-      id: users.id,
-      email: users.email,
-      firstName: users.firstName,
-      lastName: users.lastName,
-      profileImageUrl: users.profileImageUrl,
-      role: users.role,
-      university: users.university,
-      level: users.level,
-      major: users.major,
-      bio: users.bio,
-      isVerified: users.isVerified,
-      createdAt: users.createdAt,
-      updatedAt: users.updatedAt
-    }).from(users);
-
-    if (query.courseId) {
-      q = q.innerJoin(tutorCourses, eq(users.id, tutorCourses.tutorId));
-      conditions.push(eq(tutorCourses.courseId, parseInt(query.courseId)));
-    }
-
-    return await q.where(and(...conditions));
+    const baseQ = db.selectDistinct().from(users);
+    const joined = query.courseId
+      ? baseQ.innerJoin(tutorCourses, eq(users.id, tutorCourses.tutorId))
+      : baseQ;
+    conditions.push(query.courseId ? eq(tutorCourses.courseId, parseInt(query.courseId)) : sql`true`);
+    const rows = await joined.where(and(...conditions));
+    return rows.map((r: any) => r.users ?? r) as User[];
   }
 
   // Courses
@@ -147,7 +138,7 @@ export class DatabaseStorage implements IStorage {
   }
 
   async addTutorCourse(data: InsertTutorCourse): Promise<TutorCourse> {
-    const [newTutorCourse] = await db.insert(tutorCourses).values(data).returning();
+    const [newTutorCourse] = await db.insert(tutorCourses).values(data as any).returning();
     return newTutorCourse;
   }
 
@@ -161,7 +152,7 @@ export class DatabaseStorage implements IStorage {
   }
 
   async addAvailability(data: InsertAvailability): Promise<Availability> {
-    const [newAvailability] = await db.insert(availabilities).values(data).returning();
+    const [newAvailability] = await db.insert(availabilities).values(data as any).returning();
     return newAvailability;
   }
 
@@ -208,6 +199,8 @@ export class DatabaseStorage implements IStorage {
       startTime: r.start_time,
       durationMinutes: r.duration_minutes,
       notes: r.notes,
+      isRecurring: r.is_recurring ?? false,
+      recurringDays: r.recurring_days ?? null,
       createdAt: r.created_at,
       student: mapUser(r.student),
       tutor: mapUser(r.tutor),
@@ -242,6 +235,8 @@ export class DatabaseStorage implements IStorage {
       startTime: r.start_time,
       durationMinutes: r.duration_minutes,
       notes: r.notes,
+      isRecurring: r.is_recurring ?? false,
+      recurringDays: r.recurring_days ?? null,
       createdAt: r.created_at,
       student: mapUser(r.student),
       tutor: mapUser(r.tutor),
@@ -250,13 +245,13 @@ export class DatabaseStorage implements IStorage {
   }
 
   async createSession(data: InsertTutoringSession): Promise<TutoringSession> {
-    const [newSession] = await db.insert(tutoringSessions).values(data).returning();
+    const [newSession] = await db.insert(tutoringSessions).values(data as any).returning();
     return newSession;
   }
 
   async updateSessionStatus(id: number, status: string): Promise<TutoringSession> {
     const [updatedSession] = await db.update(tutoringSessions)
-      .set({ status })
+      .set({ status: status as any })
       .where(eq(tutoringSessions.id, id))
       .returning();
     return updatedSession;
@@ -288,7 +283,7 @@ export class DatabaseStorage implements IStorage {
   }
 
   async createMessage(data: InsertMessage & { sessionId: number }): Promise<Message> {
-    const [newMessage] = await db.insert(messages).values(data).returning();
+    const [newMessage] = await db.insert(messages).values(data as any).returning();
     return newMessage;
   }
 

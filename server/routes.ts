@@ -6,8 +6,9 @@ import { z } from "zod";
 import { registerLocalAuthRoutes, isAuthenticated } from "./localAuth";
 import { registerAdminRoutes } from "./adminRoutes";
 import { db } from "./db";
-import { courses, tutoringSessions, users, messages, reviews } from "@shared/schema";
-import { eq, or, and, inArray, sql } from "drizzle-orm";
+import { courses, tutoringSessions, users, messages, reviews, quizzes, flashcards, quizAttempts, studyGoals, studyRooms } from "@shared/schema";
+import { insertQuizSchema, insertFlashcardSchema, insertStudyRoomSchema } from "@shared/schema";
+import { eq, or, and, inArray, sql, ilike, desc } from "drizzle-orm";
 import { notifySessionRequest, notifySessionStatus, notifyNewMessage } from "./email";
 import { broadcastToUser } from "./websocket";
 
@@ -162,7 +163,7 @@ export async function registerRoutes(
   app.post(api.tutorCourses.add.path, isAuthenticated, async (req: any, res) => {
     try {
       const input = api.tutorCourses.add.input.parse(req.body);
-      const tutorCourse = await storage.addTutorCourse({ ...input, tutorId: req.userId });
+      const tutorCourse = await storage.addTutorCourse({ ...input, tutorId: req.userId } as any);
       res.status(201).json(tutorCourse);
     } catch (err) {
       if (err instanceof z.ZodError) {
@@ -194,7 +195,7 @@ export async function registerRoutes(
   app.post(api.availabilities.add.path, isAuthenticated, async (req: any, res) => {
     try {
       const input = api.availabilities.add.input.parse(req.body);
-      const availability = await storage.addAvailability({ ...input, tutorId: req.userId });
+      const availability = await storage.addAvailability({ ...input, tutorId: req.userId } as any);
       res.status(201).json(availability);
     } catch (err) {
       if (err instanceof z.ZodError) {
@@ -398,7 +399,7 @@ export async function registerRoutes(
         return res.status(401).json({ message: "Unauthorized" });
       }
 
-      if (!["completed", "cancelled", "declined"].includes(session.status)) {
+      if (!["completed", "cancelled", "declined"].includes(session.status ?? "")) {
         return res.status(400).json({ message: "Only completed or cancelled sessions can be deleted" });
       }
 
@@ -454,7 +455,7 @@ export async function registerRoutes(
         ...input,
         sessionId,
         senderId: req.userId,
-      });
+      } as any);
 
       // Notify the other party via WebSocket and email
       try {
@@ -467,12 +468,12 @@ export async function registerRoutes(
           type: "message-notification",
           sessionId,
           senderName,
-          preview: input.type === "text" ? (input.content || "").slice(0, 80) : input.type === "file" ? "Sent a file" : "Sent a message",
+          preview: (input.type as string) === "text" ? (input.content || "").slice(0, 80) : "Sent a file",
           messageType: input.type,
         });
 
         // Email for text messages only
-        if (input.type === "text") {
+        if ((input.type as string) === "text") {
           const other = await storage.getUser(otherId);
           const course = (await db.select().from(courses).where(eq(courses.id, session.courseId)))[0];
           if (other?.email && sender && course) {
@@ -602,6 +603,309 @@ export async function registerRoutes(
       if (err instanceof z.ZodError) {
         return res.status(400).json({ message: err.errors[0].message });
       }
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  // ---- QUIZ ROUTES ----
+
+  // GET /api/quizzes - list all public quizzes (optional ?courseId=)
+  app.get("/api/quizzes", async (req, res) => {
+    try {
+      const courseIdParam = req.query.courseId ? parseInt(req.query.courseId as string) : undefined;
+      let query = db.select().from(quizzes).where(eq(quizzes.isPublic, true)).orderBy(desc(quizzes.createdAt));
+      const results = await query;
+      const filtered = courseIdParam
+        ? results.filter(q => q.courseId === courseIdParam)
+        : results;
+      res.json(filtered);
+    } catch (err) {
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  // POST /api/quizzes - create quiz
+  app.post("/api/quizzes", isAuthenticated, async (req: any, res) => {
+    try {
+      const input = insertQuizSchema.parse(req.body);
+      const [quiz] = await db.insert(quizzes).values({
+        ...input,
+        tutorId: req.userId,
+      }).returning();
+      res.status(201).json(quiz);
+    } catch (err) {
+      if (err instanceof z.ZodError) {
+        return res.status(400).json({ message: err.errors[0].message });
+      }
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  // GET /api/quizzes/:id - get quiz with flashcards
+  app.get("/api/quizzes/:id", async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      const [quiz] = await db.select().from(quizzes).where(eq(quizzes.id, id));
+      if (!quiz) return res.status(404).json({ message: "Quiz not found" });
+      const cards = await db.select().from(flashcards).where(eq(flashcards.quizId, id)).orderBy(flashcards.orderIdx);
+      res.json({ ...quiz, flashcards: cards });
+    } catch (err) {
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  // DELETE /api/quizzes/:id - delete quiz (owner only)
+  app.delete("/api/quizzes/:id", isAuthenticated, async (req: any, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      const [quiz] = await db.select().from(quizzes).where(eq(quizzes.id, id));
+      if (!quiz) return res.status(404).json({ message: "Quiz not found" });
+      if (quiz.tutorId !== req.userId) return res.status(401).json({ message: "Unauthorized" });
+      await db.delete(quizzes).where(eq(quizzes.id, id));
+      res.status(204).end();
+    } catch (err) {
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  // POST /api/quizzes/:id/cards - add flashcard
+  app.post("/api/quizzes/:id/cards", isAuthenticated, async (req: any, res) => {
+    try {
+      const quizId = parseInt(req.params.id);
+      const [quiz] = await db.select().from(quizzes).where(eq(quizzes.id, quizId));
+      if (!quiz) return res.status(404).json({ message: "Quiz not found" });
+      if (quiz.tutorId !== req.userId) return res.status(401).json({ message: "Unauthorized" });
+      const input = insertFlashcardSchema.parse(req.body);
+      const [card] = await db.insert(flashcards).values({ ...input, quizId }).returning();
+      res.status(201).json(card);
+    } catch (err) {
+      if (err instanceof z.ZodError) {
+        return res.status(400).json({ message: err.errors[0].message });
+      }
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  // DELETE /api/quizzes/cards/:cardId - delete flashcard
+  app.delete("/api/quizzes/cards/:cardId", isAuthenticated, async (req: any, res) => {
+    try {
+      const cardId = parseInt(req.params.cardId);
+      const [card] = await db.select().from(flashcards).where(eq(flashcards.id, cardId));
+      if (!card) return res.status(404).json({ message: "Flashcard not found" });
+      const [quiz] = await db.select().from(quizzes).where(eq(quizzes.id, card.quizId));
+      if (!quiz || quiz.tutorId !== req.userId) return res.status(401).json({ message: "Unauthorized" });
+      await db.delete(flashcards).where(eq(flashcards.id, cardId));
+      res.status(204).end();
+    } catch (err) {
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  // POST /api/quizzes/:id/attempt - record attempt
+  app.post("/api/quizzes/:id/attempt", isAuthenticated, async (req: any, res) => {
+    try {
+      const quizId = parseInt(req.params.id);
+      const { score, totalCards } = z.object({ score: z.number(), totalCards: z.number() }).parse(req.body);
+      const [attempt] = await db.insert(quizAttempts).values({
+        userId: req.userId,
+        quizId,
+        score,
+        totalCards,
+      }).returning();
+      res.status(201).json(attempt);
+    } catch (err) {
+      if (err instanceof z.ZodError) {
+        return res.status(400).json({ message: err.errors[0].message });
+      }
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  // ---- STUDY ROOMS ROUTES ----
+
+  // GET /api/rooms - list active rooms
+  app.get("/api/rooms", async (req, res) => {
+    try {
+      const rooms = await db.select().from(studyRooms).where(eq(studyRooms.isActive, true)).orderBy(desc(studyRooms.createdAt));
+      res.json(rooms);
+    } catch (err) {
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  // POST /api/rooms - create room
+  app.post("/api/rooms", isAuthenticated, async (req: any, res) => {
+    try {
+      const input = insertStudyRoomSchema.parse(req.body);
+      const jitsiRoomId = "studysync-room-" + Math.random().toString(36).slice(2, 10);
+      const [room] = await db.insert(studyRooms).values({
+        ...input,
+        hostId: req.userId,
+        jitsiRoomId,
+      }).returning();
+      res.status(201).json(room);
+    } catch (err) {
+      if (err instanceof z.ZodError) {
+        return res.status(400).json({ message: err.errors[0].message });
+      }
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  // PATCH /api/rooms/:id/close - set isActive=false (host only)
+  app.patch("/api/rooms/:id/close", isAuthenticated, async (req: any, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      const [room] = await db.select().from(studyRooms).where(eq(studyRooms.id, id));
+      if (!room) return res.status(404).json({ message: "Room not found" });
+      if (room.hostId !== req.userId) return res.status(401).json({ message: "Unauthorized" });
+      const [updated] = await db.update(studyRooms).set({ isActive: false }).where(eq(studyRooms.id, id)).returning();
+      res.json(updated);
+    } catch (err) {
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  // DELETE /api/rooms/:id - delete room (host only)
+  app.delete("/api/rooms/:id", isAuthenticated, async (req: any, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      const [room] = await db.select().from(studyRooms).where(eq(studyRooms.id, id));
+      if (!room) return res.status(404).json({ message: "Room not found" });
+      if (room.hostId !== req.userId) return res.status(401).json({ message: "Unauthorized" });
+      await db.delete(studyRooms).where(eq(studyRooms.id, id));
+      res.status(204).end();
+    } catch (err) {
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  // ---- GOALS ROUTES ----
+
+  // GET /api/goals - get current user's goal
+  app.get("/api/goals", isAuthenticated, async (req: any, res) => {
+    try {
+      const [goal] = await db.select().from(studyGoals).where(eq(studyGoals.userId, req.userId));
+      res.json(goal || null);
+    } catch (err) {
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  // POST /api/goals - upsert goal by userId
+  app.post("/api/goals", isAuthenticated, async (req: any, res) => {
+    try {
+      const { weeklyHoursTarget } = z.object({ weeklyHoursTarget: z.number().min(1).max(168) }).parse(req.body);
+      const [goal] = await db.insert(studyGoals)
+        .values({ userId: req.userId, weeklyHoursTarget, updatedAt: new Date() })
+        .onConflictDoUpdate({
+          target: studyGoals.userId,
+          set: { weeklyHoursTarget, updatedAt: new Date() },
+        })
+        .returning();
+      res.json(goal);
+    } catch (err) {
+      if (err instanceof z.ZodError) {
+        return res.status(400).json({ message: err.errors[0].message });
+      }
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  // ---- SEARCH ROUTE ----
+
+  // GET /api/search?q=... - search across users (tutors), courses, quizzes
+  app.get("/api/search", async (req, res) => {
+    try {
+      const q = ((req.query.q as string) || "").trim();
+      if (!q || q.length < 1) return res.json({ users: [], courses: [], quizzes: [] });
+
+      const pattern = `%${q}%`;
+
+      const [matchedUsers, matchedCourses, matchedQuizzes] = await Promise.all([
+        db.select({
+          id: users.id,
+          firstName: users.firstName,
+          lastName: users.lastName,
+          profileImageUrl: users.profileImageUrl,
+          role: users.role,
+          university: users.university,
+          bio: users.bio,
+        }).from(users).where(
+          and(
+            eq(users.isBanned, false),
+            or(
+              ilike(users.firstName, pattern),
+              ilike(users.lastName, pattern),
+              ilike(users.university, pattern),
+            )
+          )
+        ).limit(10),
+
+        db.select().from(courses).where(
+          or(
+            ilike(courses.code, pattern),
+            ilike(courses.name, pattern),
+            ilike(courses.university, pattern),
+          )
+        ).limit(10),
+
+        db.select().from(quizzes).where(
+          and(
+            eq(quizzes.isPublic, true),
+            ilike(quizzes.title, pattern),
+          )
+        ).limit(10),
+      ]);
+
+      res.json({ users: matchedUsers, courses: matchedCourses, quizzes: matchedQuizzes });
+    } catch (err) {
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  // ---- ICAL EXPORT ----
+
+  // GET /api/sessions/ical - return .ics file for all user's sessions
+  app.get("/api/sessions/ical", isAuthenticated, async (req: any, res) => {
+    try {
+      const userSessions = await storage.getUserSessions(req.userId);
+
+      const pad = (n: number) => String(n).padStart(2, "0");
+      const toIcalDate = (d: Date) => {
+        return `${d.getUTCFullYear()}${pad(d.getUTCMonth() + 1)}${pad(d.getUTCDate())}T${pad(d.getUTCHours())}${pad(d.getUTCMinutes())}${pad(d.getUTCSeconds())}Z`;
+      };
+
+      const lines: string[] = [
+        "BEGIN:VCALENDAR",
+        "VERSION:2.0",
+        "PRODID:-//StudySync//StudySync Calendar//EN",
+        "CALSCALE:GREGORIAN",
+        "METHOD:PUBLISH",
+      ];
+
+      for (const session of userSessions) {
+        if (!session.date) continue;
+        const start = new Date(session.date);
+        const end = new Date(start.getTime() + (session.durationMinutes || 60) * 60 * 1000);
+        const summary = `Study Session (${session.status})`;
+        const description = session.notes ? session.notes.replace(/\n/g, "\\n") : "";
+        lines.push("BEGIN:VEVENT");
+        lines.push(`UID:studysync-session-${session.id}@studysync`);
+        lines.push(`DTSTAMP:${toIcalDate(new Date())}`);
+        lines.push(`DTSTART:${toIcalDate(start)}`);
+        lines.push(`DTEND:${toIcalDate(end)}`);
+        lines.push(`SUMMARY:${summary}`);
+        if (description) lines.push(`DESCRIPTION:${description}`);
+        lines.push("END:VEVENT");
+      }
+
+      lines.push("END:VCALENDAR");
+
+      res.setHeader("Content-Type", "text/calendar; charset=utf-8");
+      res.setHeader("Content-Disposition", "attachment; filename=studysync-sessions.ics");
+      res.send(lines.join("\r\n"));
+    } catch (err) {
       res.status(500).json({ message: "Internal server error" });
     }
   });

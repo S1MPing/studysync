@@ -2,10 +2,99 @@ import { useSessions } from "@/hooks/use-sessions";
 import { useAuth } from "@/hooks/use-auth";
 import { Link } from "wouter";
 import { format } from "date-fns";
-import { Card, CardContent } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Loader2, TrendingUp, Clock, Users, Star, CheckCircle2, BookOpen, ArrowRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { useState } from "react";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+
+function GoalWidget({ sessions }: { sessions: any[] }) {
+  const queryClient = useQueryClient();
+  const [editing, setEditing] = useState(false);
+  const [targetInput, setTargetInput] = useState("");
+
+  const { data: goal } = useQuery<{ weeklyHoursTarget: number } | null>({
+    queryKey: ["/api/goals"],
+    queryFn: async () => {
+      const res = await fetch("/api/goals", { credentials: "include" });
+      if (!res.ok) return null;
+      return res.json();
+    },
+  });
+
+  const upsertGoal = useMutation({
+    mutationFn: async (weeklyHoursTarget: number) => {
+      const res = await fetch("/api/goals", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ weeklyHoursTarget }),
+      });
+      if (!res.ok) throw new Error("Failed to save goal");
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/goals"] });
+      setEditing(false);
+    },
+  });
+
+  // Calculate this week's completed hours
+  const now = new Date();
+  const startOfWeek = new Date(now);
+  startOfWeek.setDate(now.getDate() - now.getDay());
+  startOfWeek.setHours(0, 0, 0, 0);
+
+  const weekHours = (sessions || [])
+    .filter((s: any) => s.status === "completed" && s.date && new Date(s.date) >= startOfWeek)
+    .reduce((acc: number, s: any) => acc + (s.durationMinutes || 60) / 60, 0);
+
+  const target = goal?.weeklyHoursTarget || 10;
+  const percent = Math.min(100, Math.round((weekHours / target) * 100));
+  const progressColor = percent >= 100 ? "bg-emerald-500" : percent >= 50 ? "bg-primary" : "bg-amber-500";
+
+  return (
+    <Card className="rounded-xl border-border/60 shadow-soft mb-6">
+      <CardHeader className="bg-muted/20 border-b pb-3 px-5 rounded-t-xl">
+        <CardTitle className="text-base flex items-center justify-between">
+          <span>Weekly Study Goal</span>
+          <button onClick={() => { setEditing(!editing); setTargetInput(String(target)); }}
+            className="text-xs text-primary hover:underline font-normal">
+            {editing ? "Cancel" : "Edit Goal"}
+          </button>
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="p-5 space-y-3">
+        {editing ? (
+          <div className="flex gap-2 items-center">
+            <Input type="number" min={1} max={40} value={targetInput} onChange={e => setTargetInput(e.target.value)}
+              className="h-9 w-24 text-sm rounded-lg" placeholder="10" />
+            <span className="text-sm text-muted-foreground">hours/week</span>
+            <Button size="sm" className="h-9 rounded-lg text-xs px-4"
+              onClick={() => upsertGoal.mutate(parseInt(targetInput) || 10)}
+              disabled={upsertGoal.isPending}>
+              Save
+            </Button>
+          </div>
+        ) : (
+          <div className="flex items-baseline gap-2">
+            <span className="text-2xl font-bold">{weekHours.toFixed(1)}</span>
+            <span className="text-muted-foreground text-sm">/ {target} hrs this week</span>
+          </div>
+        )}
+        <div className="relative w-full bg-muted rounded-full h-3 overflow-hidden">
+          <div className={`h-full rounded-full transition-all duration-500 ${progressColor}`} style={{ width: `${percent}%` }} />
+        </div>
+        <div className="flex justify-between text-xs text-muted-foreground">
+          <span>{percent}% complete</span>
+          <span>{Math.max(0, target - weekHours).toFixed(1)} hrs to go</span>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
 
 export function Progress() {
   const { user } = useAuth();
@@ -91,6 +180,9 @@ export function Progress() {
           {isTutor ? "Your tutoring statistics and history." : "Track your learning journey and session history."}
         </p>
       </div>
+
+      {/* Weekly Goal Widget */}
+      <GoalWidget sessions={mySessions} />
 
       {/* Stats grid */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">

@@ -35,7 +35,7 @@ export function registerAuthRoutes(app: Express): void {
         return res.status(409).json({ message: "An account with this email already exists" });
       }
 
-      const passwordHash = await bcrypt.hash(input.password, 12);
+      const password = await bcrypt.hash(input.password, 12);
 
       const [user] = await db
         .insert(users)
@@ -43,7 +43,7 @@ export function registerAuthRoutes(app: Express): void {
           email: input.email.toLowerCase().trim(),
           firstName: input.firstName,
           lastName: input.lastName,
-          passwordHash,
+          password,
         })
         .returning();
 
@@ -52,8 +52,8 @@ export function registerAuthRoutes(app: Express): void {
         if (err) {
           return res.status(500).json({ message: "Login after register failed" });
         }
-        // Return user without passwordHash
-        const { passwordHash: _, ...safeUser } = user;
+        // Return user without password hash
+        const { password: _, ...safeUser } = user;
         res.status(201).json(safeUser);
       });
     } catch (err) {
@@ -82,7 +82,7 @@ export function registerAuthRoutes(app: Express): void {
       }
       req.login(user, (loginErr) => {
         if (loginErr) return next(loginErr);
-        const { passwordHash: _, ...safeUser } = user;
+        const { password: _, ...safeUser } = user;
         res.json(safeUser);
       });
     })(req, res, next);
@@ -103,7 +103,7 @@ export function registerAuthRoutes(app: Express): void {
   // ── Get Current User ──────────────────────────────────────────────────────
   app.get("/api/auth/user", isAuthenticated, (req, res) => {
     const user = req.user as any;
-    const { passwordHash: _, ...safeUser } = user;
+    const { password: _, ...safeUser } = user;
     res.json(safeUser);
   });
 }

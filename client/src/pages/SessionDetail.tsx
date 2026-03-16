@@ -12,9 +12,176 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useToast } from "@/hooks/use-toast";
 import {
   Send, Loader2, ArrowLeft, Video, VideoOff, Phone,
-  Mic, MicOff, PhoneOff, CalendarPlus, Minimize2, Maximize2, X, Check, Paperclip, Edit3, Save, Lock, Signal, PhoneCall, Monitor, MonitorOff, FileDown, CheckCheck
+  Mic, MicOff, PhoneOff, CalendarPlus, Minimize2, Maximize2, X, Check, Paperclip, Edit3, Save, Lock, Signal, PhoneCall, Monitor, MonitorOff, FileDown, CheckCheck, Pencil
 } from "lucide-react";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { format } from "date-fns";
+import katex from "katex";
+import "katex/dist/katex.min.css";
+
+function renderMessageContent(text: string): React.ReactNode {
+  if (!text) return null;
+
+  const displayMathRegex = /\$\$([\s\S]+?)\$\$/g;
+  const inlineMathRegex = /\$([^\$\n]+?)\$/g;
+
+  // Process display math first
+  const processed = text.replace(displayMathRegex, (_, math) => {
+    try {
+      return katex.renderToString(math.trim(), { displayMode: true, throwOnError: false });
+    } catch {
+      return `$$${math}$$`;
+    }
+  });
+
+  // Now process inline math
+  const segments: Array<{ type: "text" | "math"; content: string }> = [];
+  let lastIndex = 0;
+  let match: RegExpExecArray | null;
+  const inlineRe = /\$([^\$\n]+?)\$/g;
+
+  while ((match = inlineRe.exec(processed)) !== null) {
+    if (match.index > lastIndex) {
+      segments.push({ type: "text", content: processed.slice(lastIndex, match.index) });
+    }
+    segments.push({ type: "math", content: match[1] });
+    lastIndex = match.index + match[0].length;
+  }
+  if (lastIndex < processed.length) {
+    segments.push({ type: "text", content: processed.slice(lastIndex) });
+  }
+
+  return segments.map((seg, i) => {
+    if (seg.type === "math") {
+      try {
+        const html = katex.renderToString(seg.content, { displayMode: false, throwOnError: false });
+        return <span key={i} dangerouslySetInnerHTML={{ __html: html }} />;
+      } catch {
+        return <span key={i}>${seg.content}$</span>;
+      }
+    }
+    if (seg.content.includes("katex-display") || seg.content.includes("<span")) {
+      return <span key={i} dangerouslySetInnerHTML={{ __html: seg.content }} />;
+    }
+    return <span key={i}>{seg.content}</span>;
+  });
+}
+
+function Whiteboard() {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const [isDrawing, setIsDrawing] = useState(false);
+  const [color, setColor] = useState("#1e1e1e");
+  const [lineSize, setLineSize] = useState(3);
+  const [isEraser, setIsEraser] = useState(false);
+  const lastPos = useRef<{ x: number; y: number } | null>(null);
+
+  const getPos = (canvas: HTMLCanvasElement, e: { clientX: number; clientY: number }) => {
+    const rect = canvas.getBoundingClientRect();
+    return {
+      x: (e.clientX - rect.left) * (canvas.width / rect.width),
+      y: (e.clientY - rect.top) * (canvas.height / rect.height),
+    };
+  };
+
+  const startDrawing = (e: React.MouseEvent | React.TouchEvent) => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    setIsDrawing(true);
+    const pos = getPos(canvas, "touches" in e ? e.touches[0] : e.nativeEvent as MouseEvent);
+    lastPos.current = pos;
+  };
+
+  const draw = (e: React.MouseEvent | React.TouchEvent) => {
+    if (!isDrawing) return;
+    const canvas = canvasRef.current;
+    const ctx = canvas?.getContext("2d");
+    if (!canvas || !ctx || !lastPos.current) return;
+    e.preventDefault();
+    const pos = getPos(canvas, "touches" in e ? e.touches[0] : e.nativeEvent as MouseEvent);
+    ctx.beginPath();
+    ctx.moveTo(lastPos.current.x, lastPos.current.y);
+    ctx.lineTo(pos.x, pos.y);
+    ctx.strokeStyle = isEraser ? "#ffffff" : color;
+    ctx.lineWidth = isEraser ? 20 : lineSize;
+    ctx.lineCap = "round";
+    ctx.lineJoin = "round";
+    ctx.stroke();
+    lastPos.current = pos;
+  };
+
+  const stopDrawing = () => {
+    setIsDrawing(false);
+    lastPos.current = null;
+  };
+
+  const clearCanvas = () => {
+    const canvas = canvasRef.current;
+    const ctx = canvas?.getContext("2d");
+    if (canvas && ctx) {
+      ctx.fillStyle = "#ffffff";
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+    }
+  };
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+    ctx.fillStyle = "#ffffff";
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+  }, []);
+
+  const COLORS = ["#1e1e1e", "#e03e3e", "#2563eb", "#16a34a", "#d97706", "#7c3aed"];
+  const SIZES = [2, 4, 8];
+
+  return (
+    <div className="flex flex-col h-full gap-2">
+      {/* Toolbar */}
+      <div className="flex items-center gap-2 p-2 bg-muted/30 rounded-lg flex-wrap">
+        <div className="flex gap-1">
+          {COLORS.map(c => (
+            <button key={c} onClick={() => { setColor(c); setIsEraser(false); }}
+              className={`w-6 h-6 rounded-full border-2 transition-all ${color === c && !isEraser ? "border-primary scale-110" : "border-transparent"}`}
+              style={{ backgroundColor: c }} />
+          ))}
+        </div>
+        <div className="flex gap-1 ml-2">
+          {SIZES.map(s => (
+            <button key={s} onClick={() => { setLineSize(s); setIsEraser(false); }}
+              className={`flex items-center justify-center w-7 h-7 rounded-md border transition-all ${lineSize === s && !isEraser ? "border-primary bg-primary/10" : "border-border hover:bg-muted"}`}>
+              <div className="rounded-full bg-foreground" style={{ width: s * 2, height: s * 2 }} />
+            </button>
+          ))}
+        </div>
+        <button onClick={() => setIsEraser(!isEraser)}
+          className={`px-2 py-1 text-xs rounded-md border transition-all ${isEraser ? "border-primary bg-primary/10 text-primary" : "border-border hover:bg-muted"}`}>
+          Eraser
+        </button>
+        <button onClick={clearCanvas}
+          className="ml-auto px-2 py-1 text-xs rounded-md border border-border hover:bg-destructive/10 hover:text-destructive hover:border-destructive transition-all">
+          Clear
+        </button>
+      </div>
+      {/* Canvas */}
+      <div className="flex-1 rounded-lg border border-border overflow-hidden bg-white">
+        <canvas
+          ref={canvasRef}
+          width={1200}
+          height={800}
+          className="w-full h-full cursor-crosshair touch-none"
+          onMouseDown={startDrawing}
+          onMouseMove={draw}
+          onMouseUp={stopDrawing}
+          onMouseLeave={stopDrawing}
+          onTouchStart={startDrawing}
+          onTouchMove={draw}
+          onTouchEnd={stopDrawing}
+        />
+      </div>
+    </div>
+  );
+}
 
 export function SessionDetail() {
   const [, params] = useRoute("/sessions/:id");
@@ -98,8 +265,9 @@ export function SessionDetail() {
   if (sessionLoading) return <div className="flex justify-center py-20"><Loader2 className="w-8 h-8 animate-spin text-primary" /></div>;
   if (!session) return <div className="flex justify-center py-20 text-muted-foreground">Session not found</div>;
 
-  const isTutor = session.tutorId === user?.id;
-  const otherPerson = isTutor ? session.student : session.tutor;
+  const s = session as any;
+  const isTutor = s.tutorId === user?.id;
+  const otherPerson = isTutor ? s.student : s.tutor;
   const isInCall = call.callState !== "idle" && call.callState !== "ended";
   const myName = [user?.firstName, user?.lastName].filter(Boolean).join(" ") || "Unknown";
   const handleStartCall = (mode: CallMode) => call.startCall(mode, otherPerson?.id, myName);
@@ -114,7 +282,7 @@ export function SessionDetail() {
     const w = window.open("", "_blank");
     if (!w) return;
     const notes = session.notes || "No notes for this session.";
-    const title = session.course?.code || `Session #${sessionId}`;
+    const title = s.course?.code || `Session #${sessionId}`;
     const date = session.date ? format(new Date(session.date), "MMMM dd, yyyy") : "Date TBD";
     const participant = otherPerson ? `${otherPerson.firstName} ${otherPerson.lastName}` : "Unknown";
     const msgLines = messages.map((m: any) => {
@@ -474,7 +642,7 @@ export function SessionDetail() {
             <div className="space-y-3">
               <div className="bg-muted/30 p-3 rounded-lg">
                 <p className="text-[10px] text-muted-foreground font-semibold uppercase mb-0.5">Course</p>
-                <p className="font-semibold text-sm">{session.course?.code || "Session"}</p>
+                <p className="font-semibold text-sm">{s.course?.code || "Session"}</p>
               </div>
               {session.date && session.startTime && (
                 <div className="bg-primary/8 p-3 rounded-lg">
@@ -589,7 +757,7 @@ export function SessionDetail() {
                 )}
               </div>
             )}
-            {["completed", "cancelled", "declined"].includes(session.status) && (
+            {["completed", "cancelled", "declined"].includes(session.status ?? "") && (
               <div className="mt-4 pt-4 border-t border-border/50 space-y-2">
                 <Button
                   size="sm"
@@ -633,105 +801,122 @@ export function SessionDetail() {
           </div>
         </div>
 
-        {/* Chat */}
-        <div className="flex-1 bg-card rounded-xl border border-border/60 shadow-soft flex flex-col overflow-hidden min-h-0">
-          <div ref={scrollRef} className="flex-1 overflow-y-auto p-4 space-y-3 bg-muted/5">
-            <div className="text-center py-2">
-              <span className="text-[10px] bg-muted text-muted-foreground px-2.5 py-1 rounded-full font-medium">Session started</span>
-            </div>
-            {messages.map((msg: any) => {
-              const isMe = msg.senderId === user?.id;
-              return (
-                <div key={msg.id} className={`flex ${isMe ? 'justify-end' : 'justify-start'}`}>
-                  <div className={`flex gap-2 max-w-[75%] ${isMe ? 'flex-row-reverse' : 'flex-row'}`}>
-                    {!isMe && (
-                      <Avatar className="w-6 h-6 shrink-0 mt-auto border border-border">
-                        <AvatarImage src={otherPerson?.profileImageUrl || ""} />
-                        <AvatarFallback className="bg-primary/8 text-primary text-[9px]">{otherPerson?.firstName?.[0]}</AvatarFallback>
-                      </Avatar>
-                    )}
-                    <div className={`rounded-xl px-3.5 py-2 relative ${isMe ? 'bg-primary text-white rounded-br-sm' : 'bg-card border border-border/50 rounded-bl-sm'}`}>
-                      {msg.type === "voice" && msg.fileUrl ? (
-                        <audio controls className="w-40">
-                          <source src={msg.fileUrl} />
-                        </audio>
-                      ) : msg.type === "image" && msg.fileUrl ? (
-                        <img src={msg.fileUrl} alt="Attachment" className="max-h-48 rounded-md" />
-                      ) : msg.type === "video" && msg.fileUrl ? (
-                        <video controls className="max-h-48 rounded-md">
-                          <source src={msg.fileUrl} />
-                        </video>
-                      ) : msg.type === "document" && msg.fileUrl ? (
-                        <a href={msg.fileUrl} target="_blank" rel="noreferrer" className="underline text-sm">
-                          {msg.content || "Download file"}
-                        </a>
-                      ) : (
-                        <p className="text-sm leading-relaxed">{msg.content}</p>
+        {/* Chat + Whiteboard Tabs */}
+        <Tabs defaultValue="messages" className="flex-1 flex flex-col overflow-hidden min-h-0">
+          <div className="bg-card border border-border/60 rounded-t-xl px-3 pt-2 shrink-0">
+            <TabsList className="h-8 bg-transparent gap-1 p-0">
+              <TabsTrigger value="messages" className="h-7 text-xs px-3 rounded-md data-[state=active]:bg-primary/10 data-[state=active]:text-primary">
+                Messages
+              </TabsTrigger>
+              <TabsTrigger value="whiteboard" className="h-7 text-xs px-3 rounded-md flex items-center gap-1.5 data-[state=active]:bg-primary/10 data-[state=active]:text-primary">
+                <Pencil className="w-3 h-3" /> Whiteboard
+              </TabsTrigger>
+            </TabsList>
+          </div>
+
+          <TabsContent value="messages" className="flex-1 flex flex-col overflow-hidden min-h-0 m-0 bg-card border-x border-b border-border/60 rounded-b-xl shadow-soft">
+            <div ref={scrollRef} className="flex-1 overflow-y-auto p-4 space-y-3 bg-muted/5">
+              <div className="text-center py-2">
+                <span className="text-[10px] bg-muted text-muted-foreground px-2.5 py-1 rounded-full font-medium">Session started</span>
+              </div>
+              {messages.map((msg: any) => {
+                const isMe = msg.senderId === user?.id;
+                return (
+                  <div key={msg.id} className={`flex ${isMe ? 'justify-end' : 'justify-start'}`}>
+                    <div className={`flex gap-2 max-w-[75%] ${isMe ? 'flex-row-reverse' : 'flex-row'}`}>
+                      {!isMe && (
+                        <Avatar className="w-6 h-6 shrink-0 mt-auto border border-border">
+                          <AvatarImage src={otherPerson?.profileImageUrl || ""} />
+                          <AvatarFallback className="bg-primary/8 text-primary text-[9px]">{otherPerson?.firstName?.[0]}</AvatarFallback>
+                        </Avatar>
                       )}
-                      {isMe && (
-                        <button
-                          type="button"
-                          onClick={() => deleteMessage.mutate(msg.id)}
-                          className="absolute -top-2 -right-2 text-[10px] bg-black/40 rounded-full px-1.5 py-0.5"
-                        >
-                          Delete
-                        </button>
-                      )}
-                      <span className={`text-[9px] mt-0.5 block opacity-60 ${isMe ? 'text-right' : 'text-left'}`}>
-                        {msg.createdAt ? format(new Date(msg.createdAt), 'h:mm a') : ''}
-                      </span>
+                      <div className={`rounded-xl px-3.5 py-2 relative ${isMe ? 'bg-primary text-white rounded-br-sm' : 'bg-card border border-border/50 rounded-bl-sm'}`}>
+                        {msg.type === "voice" && msg.fileUrl ? (
+                          <audio controls className="w-40">
+                            <source src={msg.fileUrl} />
+                          </audio>
+                        ) : msg.type === "image" && msg.fileUrl ? (
+                          <img src={msg.fileUrl} alt="Attachment" className="max-h-48 rounded-md" />
+                        ) : msg.type === "video" && msg.fileUrl ? (
+                          <video controls className="max-h-48 rounded-md">
+                            <source src={msg.fileUrl} />
+                          </video>
+                        ) : msg.type === "document" && msg.fileUrl ? (
+                          <a href={msg.fileUrl} target="_blank" rel="noreferrer" className="underline text-sm">
+                            {msg.content || "Download file"}
+                          </a>
+                        ) : (
+                          <p className="text-sm leading-relaxed">{renderMessageContent(msg.content || "")}</p>
+                        )}
+                        {isMe && (
+                          <button
+                            type="button"
+                            onClick={() => deleteMessage.mutate(msg.id)}
+                            className="absolute -top-2 -right-2 text-[10px] bg-black/40 rounded-full px-1.5 py-0.5"
+                          >
+                            Delete
+                          </button>
+                        )}
+                        <span className={`text-[9px] mt-0.5 block opacity-60 ${isMe ? 'text-right' : 'text-left'}`}>
+                          {msg.createdAt ? format(new Date(msg.createdAt), 'h:mm a') : ''}
+                        </span>
+                      </div>
                     </div>
                   </div>
+                );
+              })}
+            </div>
+            {/* Typing indicator */}
+            {partnerTyping && (
+              <div className="px-4 py-1.5 bg-card border-t border-border/30 flex items-center gap-1.5">
+                <div className="flex gap-0.5 items-end">
+                  {[0, 1, 2].map(i => (
+                    <span key={i} className="w-1.5 h-1.5 rounded-full bg-muted-foreground/40 animate-bounce" style={{ animationDelay: `${i * 0.15}s` }} />
+                  ))}
                 </div>
-              );
-            })}
-          </div>
-          {/* Typing indicator */}
-          {partnerTyping && (
-            <div className="px-4 py-1.5 bg-card border-t border-border/30 flex items-center gap-1.5">
-              <div className="flex gap-0.5 items-end">
-                {[0, 1, 2].map(i => (
-                  <span key={i} className="w-1.5 h-1.5 rounded-full bg-muted-foreground/40 animate-bounce" style={{ animationDelay: `${i * 0.15}s` }} />
-                ))}
+                <span className="text-[11px] text-muted-foreground">{otherPerson?.firstName} is typing...</span>
               </div>
-              <span className="text-[11px] text-muted-foreground">{otherPerson?.firstName} is typing...</span>
+            )}
+            {/* Read receipt */}
+            {partnerRead && messages.length > 0 && (
+              <div className="px-4 pb-1 flex justify-end">
+                <span className="text-[10px] text-muted-foreground flex items-center gap-0.5">
+                  <CheckCheck className="w-3 h-3 text-primary" /> Seen
+                </span>
+              </div>
+            )}
+            <div className="p-3 bg-card border-t border-border/50 shrink-0">
+              <form onSubmit={handleSend} className="flex items-center gap-2">
+                {/* File attach */}
+                <input ref={fileInputRef} type="file" className="hidden"
+                  accept="image/*,video/*,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.zip"
+                  onChange={handleFileUpload} />
+                <button type="button" onClick={() => fileInputRef.current?.click()}
+                  disabled={uploadingFile}
+                  className="w-10 h-10 rounded-lg shrink-0 bg-muted/40 hover:bg-muted flex items-center justify-center text-muted-foreground transition-colors">
+                  {uploadingFile ? <Loader2 className="w-4 h-4 animate-spin" /> : <Paperclip className="w-4 h-4" />}
+                </button>
+                <Input placeholder="Type a message... (use $...$ for math)" className="flex-1 rounded-lg h-10 bg-muted/20 border-border/50 text-sm px-3.5"
+                  value={content} onChange={e => { setContent(e.target.value); handleTyping(); }} />
+                <Button
+                  type="button"
+                  size="icon"
+                  className={`h-10 w-10 rounded-lg shrink-0 ${recording ? "bg-destructive text-white" : ""}`}
+                  onClick={handleSendVoice}
+                >
+                  {recording ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
+                </Button>
+                <Button type="submit" disabled={!content.trim() || sendMessage.isPending} size="icon" className="h-10 w-10 rounded-lg shrink-0">
+                  <Send className="w-4 h-4" />
+                </Button>
+              </form>
             </div>
-          )}
-          {/* Read receipt */}
-          {partnerRead && messages.length > 0 && (
-            <div className="px-4 pb-1 flex justify-end">
-              <span className="text-[10px] text-muted-foreground flex items-center gap-0.5">
-                <CheckCheck className="w-3 h-3 text-primary" /> Seen
-              </span>
-            </div>
-          )}
-          <div className="p-3 bg-card border-t border-border/50 shrink-0">
-            <form onSubmit={handleSend} className="flex items-center gap-2">
-              {/* File attach */}
-              <input ref={fileInputRef} type="file" className="hidden"
-                accept="image/*,video/*,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.zip"
-                onChange={handleFileUpload} />
-              <button type="button" onClick={() => fileInputRef.current?.click()}
-                disabled={uploadingFile}
-                className="w-10 h-10 rounded-lg shrink-0 bg-muted/40 hover:bg-muted flex items-center justify-center text-muted-foreground transition-colors">
-                {uploadingFile ? <Loader2 className="w-4 h-4 animate-spin" /> : <Paperclip className="w-4 h-4" />}
-              </button>
-              <Input placeholder="Type a message..." className="flex-1 rounded-lg h-10 bg-muted/20 border-border/50 text-sm px-3.5"
-                value={content} onChange={e => { setContent(e.target.value); handleTyping(); }} />
-              <Button
-                type="button"
-                size="icon"
-                className={`h-10 w-10 rounded-lg shrink-0 ${recording ? "bg-destructive text-white" : ""}`}
-                onClick={handleSendVoice}
-              >
-                {recording ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
-              </Button>
-              <Button type="submit" disabled={!content.trim() || sendMessage.isPending} size="icon" className="h-10 w-10 rounded-lg shrink-0">
-                <Send className="w-4 h-4" />
-              </Button>
-            </form>
-          </div>
-        </div>
+          </TabsContent>
+
+          <TabsContent value="whiteboard" className="flex-1 flex flex-col overflow-hidden min-h-[400px] m-0 bg-card border-x border-b border-border/60 rounded-b-xl shadow-soft p-3">
+            <Whiteboard />
+          </TabsContent>
+        </Tabs>
       </div>
     </>
   );

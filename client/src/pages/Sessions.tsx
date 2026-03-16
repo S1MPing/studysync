@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useSessions, useUpdateSessionStatus, useDeleteSession } from "@/hooks/use-sessions";
+import { useSessions, useUpdateSessionStatus, useDeleteSession, useScheduleSession } from "@/hooks/use-sessions";
 import { useAuth } from "@/hooks/use-auth";
 import { Link } from "wouter";
 import { format } from "date-fns";
@@ -8,13 +8,16 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Textarea } from "@/components/ui/textarea";
-import { BookOpen, CalendarCheck, Check, X, Loader2, MessageSquare, PhoneOff, Star } from "lucide-react";
+import { Input } from "@/components/ui/input";
+import { BookOpen, CalendarCheck, CalendarPlus, Check, X, Loader2, MessageSquare, PhoneOff, Star } from "lucide-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useToast } from "@/hooks/use-toast";
+import { CalendarSync } from "@/components/CalendarSync";
 
 export function Sessions() {
   const { user } = useAuth();
-  const { data: sessions, isLoading } = useSessions();
+  const { data: sessionsRaw, isLoading } = useSessions();
+  const sessions = sessionsRaw as any[] | undefined;
   const updateStatus = useUpdateSessionStatus();
   const deleteSession = useDeleteSession();
   const { toast } = useToast();
@@ -27,6 +30,54 @@ export function Sessions() {
   const [courseFilter, setCourseFilter] = useState<string>("all");
   const [universityFilter, setUniversityFilter] = useState<string>("all");
   const [timeFilter, setTimeFilter] = useState<"all" | "morning" | "afternoon" | "evening" | "night">("all");
+
+  // Scheduling dialog state
+  const scheduleSession = useScheduleSession();
+  const [scheduleDialog, setScheduleDialog] = useState<{ sessionId: number } | null>(null);
+  const [schedDate, setSchedDate] = useState("");
+  const [schedTime, setSchedTime] = useState("18:00");
+  const [schedRecurring, setSchedRecurring] = useState(false);
+  const [schedRecurringDays, setSchedRecurringDays] = useState<number[]>([]);
+
+  const DAY_LABELS: { value: number; label: string }[] = [
+    { value: 1, label: "Mon" },
+    { value: 2, label: "Tue" },
+    { value: 3, label: "Wed" },
+    { value: 4, label: "Thu" },
+    { value: 5, label: "Fri" },
+    { value: 6, label: "Sat" },
+    { value: 7, label: "Sun" },
+  ];
+
+  const toggleRecurringDay = (day: number) => {
+    setSchedRecurringDays(prev =>
+      prev.includes(day) ? prev.filter(d => d !== day) : [...prev, day]
+    );
+  };
+
+  const handleScheduleSubmit = () => {
+    if (!scheduleDialog || !schedDate) return;
+    const payload: any = {
+      id: scheduleDialog.sessionId,
+      date: schedDate,
+      startTime: schedTime,
+    };
+    if (schedRecurring && schedRecurringDays.length > 0) {
+      payload.isRecurring = true;
+      payload.recurringDays = schedRecurringDays.sort((a, b) => a - b).join(",");
+    }
+    scheduleSession.mutate(payload, {
+      onSuccess: () => {
+        setScheduleDialog(null);
+        setSchedDate("");
+        setSchedTime("18:00");
+        setSchedRecurring(false);
+        setSchedRecurringDays([]);
+        toast({ title: schedRecurring ? "Recurring schedule set!" : "Session scheduled!" });
+      },
+      onError: () => toast({ title: "Failed to schedule session", variant: "destructive" }),
+    });
+  };
 
   const submitReview = useMutation({
     mutationFn: async ({ sessionId, revieweeId, rating, comment }: any) => {
@@ -164,6 +215,19 @@ export function Sessions() {
                 </Button>
               </Link>
             )}
+            {session.status === 'accepted' && !session.date && (
+              <Button size="sm" variant="outline"
+                className="rounded-lg border-primary/20 text-primary hover:bg-primary/5"
+                onClick={() => {
+                  setSchedDate("");
+                  setSchedTime("18:00");
+                  setSchedRecurring(false);
+                  setSchedRecurringDays([]);
+                  setScheduleDialog({ sessionId: session.id });
+                }}>
+                <CalendarPlus className="w-4 h-4 mr-1" /> Propose a Time
+              </Button>
+            )}
 
             {(session.status === "accepted" || session.status === "scheduled") && (
               <Button
@@ -203,11 +267,16 @@ export function Sessions() {
   return (
     <div className="max-w-4xl mx-auto w-full space-y-8 pb-12">
       <div className="mb-8 space-y-4">
-        <div>
-          <h1 className="text-3xl md:text-4xl font-display font-bold">My Sessions</h1>
-          <p className="text-muted-foreground mt-2">
-            {isTutorOnly ? "View and manage sessions you are teaching." : "View and manage sessions where you are learning."}
-          </p>
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h1 className="text-3xl md:text-4xl font-display font-bold">My Sessions</h1>
+            <p className="text-muted-foreground mt-2">
+              {isTutorOnly ? "View and manage sessions you are teaching." : "View and manage sessions where you are learning."}
+            </p>
+          </div>
+          <div className="pt-1">
+            <CalendarSync sessions={sessions || []} />
+          </div>
         </div>
 
         {/* Filters */}
@@ -281,6 +350,70 @@ export function Sessions() {
           {filteredLearning.length > 0 ? filteredLearning.map(s => renderSessionCard(s, false)) : <EmptyState />}
         </div>
       )}
+
+      {/* Schedule Dialog */}
+      <Dialog open={!!scheduleDialog} onOpenChange={(open) => !open && setScheduleDialog(null)}>
+        <DialogContent className="sm:max-w-[400px] rounded-xl p-5">
+          <DialogHeader>
+            <DialogTitle className="text-base">Propose a Time</DialogTitle>
+            <p className="text-xs text-muted-foreground mt-1">Pick a date and time for this session.</p>
+          </DialogHeader>
+          <div className="space-y-4 mt-2">
+            <div className="space-y-1.5">
+              <p className="text-xs font-semibold">Date</p>
+              <Input type="date" className="h-9 rounded-lg text-sm"
+                value={schedDate} onChange={e => setSchedDate(e.target.value)} />
+            </div>
+            <div className="space-y-1.5">
+              <p className="text-xs font-semibold">Time</p>
+              <Input type="time" className="h-9 rounded-lg text-sm"
+                value={schedTime} onChange={e => setSchedTime(e.target.value)} />
+            </div>
+
+            {/* Recurring toggle */}
+            <div className="border border-border/60 rounded-lg p-3 space-y-3">
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input type="checkbox" checked={schedRecurring}
+                  onChange={e => setSchedRecurring(e.target.checked)}
+                  className="rounded border-border" />
+                <span className="text-xs font-semibold">Recurring sessions</span>
+              </label>
+              {schedRecurring && (
+                <div className="space-y-2 pl-1">
+                  <p className="text-[11px] text-muted-foreground">Select days of the week:</p>
+                  <div className="flex flex-wrap gap-1.5">
+                    {DAY_LABELS.map(({ value, label }) => (
+                      <button
+                        key={value}
+                        type="button"
+                        onClick={() => toggleRecurringDay(value)}
+                        className={`px-2.5 py-1 rounded-md text-xs font-medium transition-colors
+                          ${schedRecurringDays.includes(value)
+                            ? "bg-primary text-white"
+                            : "bg-muted text-muted-foreground hover:bg-muted/80"}`}
+                      >
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+                  {schedRecurringDays.length > 0 && (
+                    <p className="text-[10px] text-muted-foreground">
+                      Days: {schedRecurringDays.sort((a, b) => a - b).join(",")}
+                    </p>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
+          <DialogFooter className="mt-4">
+            <Button variant="outline" size="sm" onClick={() => setScheduleDialog(null)}>Cancel</Button>
+            <Button size="sm" disabled={!schedDate || scheduleSession.isPending}
+              onClick={handleScheduleSubmit}>
+              {scheduleSession.isPending ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : "Confirm"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Review Dialog */}
       <Dialog open={!!reviewSession} onOpenChange={(open) => !open && setReviewSession(null)}>

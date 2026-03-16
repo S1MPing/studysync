@@ -214,34 +214,39 @@ export function Profile() {
   };
 
   return (
-    <div className="max-w-4xl mx-auto w-full space-y-6 pb-12">
+    <div className="max-w-4xl mx-auto w-full space-y-6 pb-12 px-4 sm:px-6 lg:px-0">
       <div>
         <h1 className="text-2xl md:text-3xl font-bold">{t("profile.title")}</h1>
         <p className="text-muted-foreground text-sm mt-1">{t("profile.subtitle")}</p>
       </div>
 
-      <div className="grid md:grid-cols-[220px_1fr] gap-6">
+      <div className="grid grid-cols-1 md:grid-cols-[220px_1fr] gap-6">
         {/* Left */}
         <div className="flex flex-col gap-4">
-          <Card className="rounded-xl border-border/60 shadow-soft text-center pt-6 pb-5 px-5">
-            <div className="relative w-24 h-24 mx-auto mb-3 group cursor-pointer" onClick={handlePhotoClick}>
-              <Avatar className="w-full h-full border-2 border-background shadow-sm">
-                <AvatarImage src={user.profileImageUrl || ""} />
-                <AvatarFallback className="bg-primary/8 text-primary text-3xl font-bold">{user.firstName?.[0] || "?"}</AvatarFallback>
-              </Avatar>
-              <div className="absolute inset-0 rounded-full bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
-                {uploading ? <Loader2 className="w-5 h-5 text-white animate-spin" /> : <Camera className="w-5 h-5 text-white" />}
+          <Card className="rounded-xl border-border/60 shadow-soft pt-6 pb-5 px-5">
+            {/* Mobile: horizontal layout, Desktop: vertical/centered */}
+            <div className="flex flex-row md:flex-col items-center gap-4 md:gap-0">
+              <div className="relative w-20 h-20 md:w-24 md:h-24 md:mx-auto md:mb-3 flex-shrink-0 group cursor-pointer" onClick={handlePhotoClick}>
+                <Avatar className="w-full h-full border-2 border-background shadow-sm">
+                  <AvatarImage src={user.profileImageUrl || ""} />
+                  <AvatarFallback className="bg-primary/8 text-primary text-3xl font-bold">{user.firstName?.[0] || "?"}</AvatarFallback>
+                </Avatar>
+                <div className="absolute inset-0 rounded-full bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                  {uploading ? <Loader2 className="w-5 h-5 text-white animate-spin" /> : <Camera className="w-5 h-5 text-white" />}
+                </div>
               </div>
-            </div>
-            <h2 className="text-base font-bold">{user.firstName} {user.lastName}</h2>
-            <p className="text-xs text-muted-foreground mt-0.5">{user.email}</p>
-            <div className="flex flex-wrap justify-center gap-1 mt-2">
-              <Badge variant="secondary" className="text-[10px]">{roleLabel}</Badge>
-              {(user as any).isAdmin && (
-                <Badge variant="outline" className="text-[10px] text-amber-600 border-amber-300 bg-amber-50">
-                  <Shield className="w-2.5 h-2.5 mr-1" />Admin
-                </Badge>
-              )}
+              <div className="flex-1 md:text-center min-w-0">
+                <h2 className="text-base font-bold truncate">{user.firstName} {user.lastName}</h2>
+                <p className="text-xs text-muted-foreground mt-0.5 truncate">{user.email}</p>
+                <div className="flex flex-wrap gap-1 mt-2 md:justify-center">
+                  <Badge variant="secondary" className="text-[10px]">{roleLabel}</Badge>
+                  {(user as any).isAdmin && (
+                    <Badge variant="outline" className="text-[10px] text-amber-600 border-amber-300 bg-amber-50">
+                      <Shield className="w-2.5 h-2.5 mr-1" />Admin
+                    </Badge>
+                  )}
+                </div>
+              </div>
             </div>
             <div className="mt-4 pt-4 border-t border-border/50">
               <Button variant="destructive" size="sm" className="w-full rounded-lg bg-destructive/8 text-destructive hover:bg-destructive hover:text-white border-0 text-xs" onClick={() => logout()} disabled={isLoggingOut}>

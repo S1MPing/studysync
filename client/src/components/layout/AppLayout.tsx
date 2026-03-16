@@ -1,4 +1,5 @@
 import { ReactNode, useState, useEffect, useCallback } from "react";
+import { GlobalSearch, useGlobalSearch } from "@/components/GlobalSearch";
 import { Link, useLocation } from "wouter";
 import { useAuth } from "@/hooks/use-auth";
 import { useI18n, languageNames, type Language } from "@/lib/i18n";
@@ -6,7 +7,8 @@ import {
   LayoutDashboard, Search, Calendar,
   LogOut, Loader2, Settings, Bell, Moon, Sun, Monitor,
   HelpCircle, X, ChevronRight, ChevronDown, Globe, Info, User, Shield, Menu, FolderOpen, TrendingUp,
-  Phone, PhoneOff, Video, MessageSquare, PhoneCall, CalendarCheck, Check, Trash2
+  Phone, PhoneOff, Video, MessageSquare, PhoneCall, CalendarCheck, Check, Trash2, Volume2, VolumeX,
+  Brain, Users
 } from "lucide-react";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Switch } from "@/components/ui/switch";
@@ -16,6 +18,7 @@ import { useIncomingCall } from "@/hooks/use-incoming-call";
 import { useGlobalRealtime } from "@/hooks/use-global-ws";
 import { useNotifications, type AppNotification } from "@/hooks/use-notifications";
 import { usePushNotifications } from "@/hooks/use-push-notifications";
+import { useSessionReminders } from "@/hooks/use-session-reminders";
 import { formatDistanceToNow } from "date-fns";
 
 type ThemeMode = "light" | "dark" | "system";
@@ -53,6 +56,19 @@ export function AppLayout({ children }: { children: ReactNode }) {
     }
   }, [theme]);
 
+  const { open: searchOpen, setOpen: setSearchOpen } = useGlobalSearch();
+
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === "k") {
+        e.preventDefault();
+        setSearchOpen(true);
+      }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [setSearchOpen]);
+
   const isTutor = user?.role === "tutor";
   const navItems = isTutor
     ? [
@@ -60,6 +76,8 @@ export function AppLayout({ children }: { children: ReactNode }) {
         { label: t("nav.sessions"), href: "/sessions", icon: Calendar },
         { label: "Shared Files", href: "/media", icon: FolderOpen },
         { label: "My Stats", href: "/progress", icon: TrendingUp },
+        { label: t("nav.quiz") || "Quiz", href: "/quiz", icon: Brain },
+        { label: t("nav.rooms") || "Rooms", href: "/rooms", icon: Users },
       ]
     : [
         { label: t("nav.dashboard"), href: "/dashboard", icon: LayoutDashboard },
@@ -67,6 +85,8 @@ export function AppLayout({ children }: { children: ReactNode }) {
         { label: t("nav.sessions"), href: "/sessions", icon: Calendar },
         { label: "Shared Files", href: "/media", icon: FolderOpen },
         { label: "My Progress", href: "/progress", icon: TrendingUp },
+        { label: t("nav.quiz") || "Quiz", href: "/quiz", icon: Brain },
+        { label: t("nav.rooms") || "Rooms", href: "/rooms", icon: Users },
       ];
 
   const themeOptions: { mode: ThemeMode; icon: any; label: string }[] = [
@@ -112,6 +132,7 @@ export function AppLayout({ children }: { children: ReactNode }) {
 
   const { incomingCall, answerCall, declineCall } = useIncomingCall(user?.id, addNotificationWithPush);
   useGlobalRealtime(user?.id, addNotificationWithPush);
+  useSessionReminders(sessions || [], addNotificationWithPush);
 
   if (!user) return <>{children}</>;
   const initials = `${user.firstName?.[0] || ""}${user.lastName?.[0] || ""}`.toUpperCase() || user.email?.charAt(0).toUpperCase() || "?";
@@ -237,6 +258,9 @@ export function AppLayout({ children }: { children: ReactNode }) {
             <span className="text-base font-bold tracking-tight">StudySync</span>
           </a>
           <div className="flex items-center gap-1">
+            <button onClick={() => setSearchOpen(true)} className="w-8 h-8 rounded-lg flex items-center justify-center hover:bg-muted/60 transition-colors text-muted-foreground" title="Search (Ctrl+K)">
+              <Search className="w-4 h-4" />
+            </button>
             <button onClick={() => setNotifOpen(true)} className="relative w-7 h-7 rounded-md hover:bg-muted flex items-center justify-center text-muted-foreground" title="Notifications">
               <Bell className="w-4 h-4" />
               {notifCount > 0 && <span className="absolute -top-0.5 -right-0.5 w-3.5 h-3.5 bg-destructive text-white text-[8px] font-bold rounded-full flex items-center justify-center">{notifCount > 9 ? "9+" : notifCount}</span>}
@@ -369,6 +393,19 @@ export function AppLayout({ children }: { children: ReactNode }) {
                               </button>
                             )}
                           </div>
+                          {/* Sound toggle */}
+                          <div className="flex items-center justify-between px-2 py-1.5 rounded-md hover:bg-muted/50">
+                            <div className="flex items-center gap-2">
+                              {notifPrefs.soundEnabled
+                                ? <Volume2 className="w-3 h-3 text-amber-500" />
+                                : <VolumeX className="w-3 h-3 text-muted-foreground" />}
+                              <span className="text-xs text-muted-foreground">Notification Sound</span>
+                            </div>
+                            <Switch
+                              checked={notifPrefs.soundEnabled}
+                              onCheckedChange={(v) => updatePrefs({ soundEnabled: v })}
+                            />
+                          </div>
                         </div>
                       </motion.div>
                     )}
@@ -497,6 +534,9 @@ export function AppLayout({ children }: { children: ReactNode }) {
               <span className="text-sm font-bold">StudySync</span>
             </a>
             <div className="flex items-center gap-1">
+              <button onClick={() => setSearchOpen(true)} className="w-8 h-8 rounded-lg flex items-center justify-center hover:bg-muted/60 transition-colors text-muted-foreground">
+                <Search className="w-4 h-4" />
+              </button>
               <button onClick={() => setNotifOpen(true)} className="relative w-7 h-7 rounded-md hover:bg-muted flex items-center justify-center text-muted-foreground">
                 <Bell className="w-4 h-4" />
                 {notifCount > 0 && <span className="absolute -top-0.5 -right-0.5 w-3.5 h-3.5 bg-destructive text-white text-[8px] font-bold rounded-full flex items-center justify-center">{notifCount > 9 ? "9+" : notifCount}</span>}
@@ -538,6 +578,7 @@ export function AppLayout({ children }: { children: ReactNode }) {
           </button>
         </div>
       </div>
+      <GlobalSearch open={searchOpen} onClose={() => setSearchOpen(false)} />
     </div>
   );
 }

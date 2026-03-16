@@ -23,6 +23,8 @@ import { Admin } from "@/pages/Admin";
 import { MediaGallery } from "@/pages/MediaGallery";
 import { Help } from "@/pages/Help";
 import { Progress } from "@/pages/Progress";
+import { Quiz } from "@/pages/Quiz";
+import { Rooms } from "@/pages/Rooms";
 import { I18nProvider } from "@/lib/i18n";
 import { useAuth } from "@/hooks/use-auth";
 import { Loader2 } from "lucide-react";
@@ -230,6 +232,22 @@ function Router() {
         <AuthGuard>
           <AppLayout>
             <Progress />
+          </AppLayout>
+        </AuthGuard>
+      </Route>
+
+      <Route path="/quiz">
+        <AuthGuard>
+          <AppLayout>
+            <Quiz />
+          </AppLayout>
+        </AuthGuard>
+      </Route>
+
+      <Route path="/rooms">
+        <AuthGuard>
+          <AppLayout>
+            <Rooms />
           </AppLayout>
         </AuthGuard>
       </Route>

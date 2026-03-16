@@ -3,7 +3,9 @@
     "allow": [
       "Bash(npm run db:push)",
       "Bash(npm install nodemailer @types/nodemailer --save)",
-      "Bash(npx tsc --noEmit)"
+      "Bash(npx tsc --noEmit)",
+      "Bash(npm install katex @types/katex)",
+      "Bash(npm run check)"
     ]
   }
 }

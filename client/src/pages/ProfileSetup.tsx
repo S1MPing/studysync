@@ -40,7 +40,7 @@ export function ProfileSetup() {
   const [selectedCourses, setSelectedCourses] = useState<number[]>([]);
   const [addingCourse, setAddingCourse] = useState("");
   const [availabilitySlots, setAvailabilitySlots] = useState<
-    { id: number; dayOfWeek: number; timeOfDay: "morning" | "afternoon" | "evening" | "night" }
+    { id: number; dayOfWeek: number; timeOfDay: "morning" | "afternoon" | "evening" | "night" }[]
   >([]);
 
   const [submitting, setSubmitting] = useState(false);

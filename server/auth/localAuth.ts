@@ -57,11 +57,11 @@ export async function setupAuth(app: Express) {
             .from(users)
             .where(eq(users.email, email.toLowerCase().trim()));
 
-          if (!user || !user.passwordHash) {
+          if (!user || !user.password) {
             return done(null, false, { message: "Invalid email or password" });
           }
 
-          const valid = await bcrypt.compare(password, user.passwordHash);
+          const valid = await bcrypt.compare(password, user.password);
           if (!valid) {
             return done(null, false, { message: "Invalid email or password" });
           }

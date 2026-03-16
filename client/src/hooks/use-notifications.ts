@@ -1,5 +1,23 @@
 import { useState, useCallback, useEffect } from "react";
 
+function playNotifSound() {
+  try {
+    const ctx = new (window.AudioContext || (window as any).webkitAudioContext)();
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.type = "sine";
+    osc.frequency.setValueAtTime(880, ctx.currentTime);
+    osc.frequency.exponentialRampToValueAtTime(660, ctx.currentTime + 0.1);
+    gain.gain.setValueAtTime(0.18, ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.3);
+    osc.start(ctx.currentTime);
+    osc.stop(ctx.currentTime + 0.3);
+    osc.onended = () => ctx.close();
+  } catch {}
+}
+
 export type NotifType = "message" | "call" | "session_request" | "session_update";
 
 export interface AppNotification {
@@ -18,6 +36,7 @@ export interface NotifPrefs {
   calls: boolean;
   sessionRequests: boolean;
   sessionUpdates: boolean;
+  soundEnabled: boolean;
 }
 
 const STORAGE_KEY = "ss_notifications";
@@ -36,8 +55,8 @@ function saveNotifs(n: AppNotification[]) {
 
 export function loadNotifPrefs(): NotifPrefs {
   try {
-    return { enabled: true, messages: true, calls: true, sessionRequests: true, sessionUpdates: true, ...JSON.parse(localStorage.getItem(PREFS_KEY) || "{}") };
-  } catch { return { enabled: true, messages: true, calls: true, sessionRequests: true, sessionUpdates: true }; }
+    return { enabled: true, messages: true, calls: true, sessionRequests: true, sessionUpdates: true, soundEnabled: true, ...JSON.parse(localStorage.getItem(PREFS_KEY) || "{}") };
+  } catch { return { enabled: true, messages: true, calls: true, sessionRequests: true, sessionUpdates: true, soundEnabled: true }; }
 }
 
 function saveNotifPrefs(p: NotifPrefs) {
@@ -80,7 +99,8 @@ export function useNotifications() {
       saveNotifs(updated);
       return updated;
     });
-  }, [isAllowed]);
+    if (prefs.soundEnabled) playNotifSound();
+  }, [isAllowed, prefs.soundEnabled]);
 
   const markRead = useCallback((id: string) => {
     setNotifications(prev => {
