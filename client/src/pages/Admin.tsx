@@ -323,10 +323,17 @@ function UsersTab() {
   const [banDuration, setBanDuration] = useState("permanent");
   const [banReason, setBanReason] = useState("");
 
-  const { data, isLoading, refetch } = useQuery({
+  const { data, isLoading, error: usersError, refetch } = useQuery({
     queryKey: ["/api/admin/users", search, roleFilter, page],
     queryFn: () => adminFetch(`/api/admin/users?search=${search}&role=${roleFilter}&page=${page}&limit=20`),
   });
+
+  const { data: onlineData } = useQuery({
+    queryKey: ["/api/admin/online-users"],
+    queryFn: () => adminFetch("/api/admin/online-users"),
+    refetchInterval: 10000,
+  });
+  const onlineIds: Set<string> = new Set((onlineData as any)?.onlineUserIds ?? []);
 
   const updateUser = useMutation({
     mutationFn: ({ id, updates }: { id: string; updates: any }) =>
@@ -358,6 +365,10 @@ function UsersTab() {
           <h1 className="text-xl font-bold text-white">User Management</h1>
           <p className="text-xs text-gray-400">Manage accounts, roles, and access</p>
         </div>
+        <div className="flex items-center gap-2 text-xs text-gray-400">
+          <span className="w-2 h-2 rounded-full bg-emerald-400 inline-block" />
+          <span className="text-emerald-400 font-semibold">{onlineIds.size}</span> online
+        </div>
       </div>
 
       {/* Filters */}
@@ -388,18 +399,26 @@ function UsersTab() {
           <table className="w-full text-xs">
             <thead>
               <tr className="border-b border-white/5">
-                {["User", "Role", "University", "Admin Role", "Status", "Joined", "Actions"].map(h => (
+                {["", "User", "Role", "University", "Admin Role", "Status", "Joined", "Actions"].map(h => (
                   <th key={h} className="px-4 py-3 text-left text-[10px] font-semibold text-gray-500 uppercase tracking-wider whitespace-nowrap">{h}</th>
                 ))}
               </tr>
             </thead>
             <tbody className="divide-y divide-white/5">
               {isLoading ? (
-                <tr><td colSpan={7} className="text-center py-8"><Loader2 className="w-5 h-5 animate-spin text-gray-500 mx-auto" /></td></tr>
+                <tr><td colSpan={8} className="text-center py-8"><Loader2 className="w-5 h-5 animate-spin text-gray-500 mx-auto" /></td></tr>
+              ) : usersError ? (
+                <tr><td colSpan={8} className="text-center py-8 text-red-400 text-xs">{(usersError as Error).message || "Failed to load users"}</td></tr>
               ) : data?.users?.length === 0 ? (
-                <tr><td colSpan={7} className="text-center py-8 text-gray-500 text-xs">No users found</td></tr>
+                <tr><td colSpan={8} className="text-center py-8 text-gray-500 text-xs">No users found</td></tr>
               ) : data?.users?.map((u: any) => (
                 <tr key={u.id} className="hover:bg-white/[0.02] transition-colors">
+                  <td className="px-3 py-3 w-6">
+                    <span
+                      title={onlineIds.has(u.id) ? "Online" : "Offline"}
+                      className={cn("block w-2 h-2 rounded-full", onlineIds.has(u.id) ? "bg-emerald-400" : "bg-gray-600")}
+                    />
+                  </td>
                   <td className="px-4 py-3">
                     <div className="flex items-center gap-2.5">
                       <div className="w-7 h-7 rounded-full bg-indigo-500/20 flex items-center justify-center text-[10px] font-bold text-indigo-300 shrink-0">

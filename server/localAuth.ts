@@ -115,8 +115,11 @@ export function registerLocalAuthRoutes(app: Express): void {
         lastName,
       }).returning();
 
-      // Set session
+      // Set session and wait for it to be persisted before responding
       (req.session as any).userId = user.id;
+      await new Promise<void>((resolve, reject) =>
+        req.session.save((err) => (err ? reject(err) : resolve()))
+      );
 
       await createAuditLog({
         userId: user.id,
@@ -163,8 +166,11 @@ export function registerLocalAuthRoutes(app: Express): void {
         return res.status(401).json({ message: "Invalid email or password" });
       }
 
-      // Set session
+      // Set session and wait for it to be persisted before responding
       (req.session as any).userId = user.id;
+      await new Promise<void>((resolve, reject) =>
+        req.session.save((err) => (err ? reject(err) : resolve()))
+      );
 
       await createAuditLog({
         userId: user.id,

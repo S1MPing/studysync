@@ -10,6 +10,10 @@ interface ConnectedClient {
 const clients: ConnectedClient[] = [];
 const globalClients = new Map<string, Set<WebSocket>>();
 
+export function getOnlineUserIds(): string[] {
+  return Array.from(globalClients.keys());
+}
+
 export function broadcastToUser(userId: string, data: object) {
   const payload = JSON.stringify(data);
 

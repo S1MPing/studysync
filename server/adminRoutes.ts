@@ -3,6 +3,7 @@ import { db } from "./db";
 import { users, tutoringSessions, messages, courses, auditLogs, reports, blockedUsers } from "@shared/schema";
 import { eq, desc, ilike, or, count, sql, and } from "drizzle-orm";
 import { isAdmin, createAuditLog } from "./localAuth";
+import { getOnlineUserIds } from "./websocket";
 import { z } from "zod";
 import * as crypto from "crypto";
 
@@ -70,6 +71,11 @@ export function registerAdminRoutes(app: Express) {
       console.error(err);
       res.status(500).json({ message: "Failed to fetch stats" });
     }
+  });
+
+  // ── ONLINE USERS ───────────────────────────────────────────
+  app.get("/api/admin/online-users", isAdmin, async (_req, res) => {
+    res.json({ onlineUserIds: getOnlineUserIds() });
   });
 
   // ── USERS ──────────────────────────────────────────────────
