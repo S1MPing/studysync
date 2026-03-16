@@ -259,11 +259,22 @@ export async function registerRoutes(
 
   app.post(api.sessions.create.path, isAuthenticated, async (req: any, res) => {
     try {
+      // Only students can request sessions
+      const [requester] = await db.select({ role: users.role }).from(users).where(eq(users.id, req.userId));
+      if (requester?.role === "tutor") {
+        return res.status(403).json({ message: "Tutors cannot request sessions from other tutors." });
+      }
+
       const { recurringWeeks, ...rawInput } = req.body;
       const input = api.sessions.create.input.parse({
         ...rawInput,
         studentId: rawInput.studentId || req.userId,
       });
+
+      // Prevent self-booking
+      if (input.tutorId === req.userId) {
+        return res.status(400).json({ message: "You cannot book a session with yourself." });
+      }
 
       const sessionData = {
         ...input,

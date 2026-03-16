@@ -457,11 +457,18 @@ export function Dashboard() {
             <Card className="rounded-xl border-border/60 shadow-sm">
               <CardContent className="p-4 space-y-2">
                 <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider mb-3">Quick Actions</p>
-                {[
-                  { href: "/tutors", icon: Search, label: "Find a Tutor", desc: "Browse available tutors" },
-                  { href: "/sessions", icon: Calendar, label: "My Sessions", desc: "View & manage sessions" },
-                  { href: "/profile", icon: UserCheck, label: "Edit Profile", desc: "Update your info" },
-                ].map(item => (
+                {(user?.role === "tutor"
+                  ? [
+                      { href: "/sessions", icon: Calendar, label: "My Sessions", desc: "View & manage sessions" },
+                      { href: "/rooms", icon: Video, label: "Study Rooms", desc: "Host or join a live room" },
+                      { href: "/profile", icon: UserCheck, label: "Edit Profile", desc: "Update your info" },
+                    ]
+                  : [
+                      { href: "/tutors", icon: Search, label: "Find a Tutor", desc: "Browse available tutors" },
+                      { href: "/sessions", icon: Calendar, label: "My Sessions", desc: "View & manage sessions" },
+                      { href: "/profile", icon: UserCheck, label: "Edit Profile", desc: "Update your info" },
+                    ]
+                ).map(item => (
                   <Link key={item.href} href={item.href}>
                     <div className="flex items-center gap-3 p-2.5 rounded-lg border border-border/50 hover:border-primary/20 hover:bg-primary/4 transition-all group cursor-pointer">
                       <div className="w-7 h-7 rounded-lg bg-muted group-hover:bg-primary/10 flex items-center justify-center transition-colors shrink-0">

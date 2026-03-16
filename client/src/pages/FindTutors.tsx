@@ -3,6 +3,7 @@ import { useTutors } from "@/hooks/use-users";
 import { useCourses } from "@/hooks/use-courses";
 import { useTutorCourses } from "@/hooks/use-tutor";
 import { useCreateSession } from "@/hooks/use-sessions";
+import { useAuth } from "@/hooks/use-auth";
 import { useI18n } from "@/lib/i18n";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -112,6 +113,7 @@ export function FindTutors() {
 }
 
 function TutorCard({ tutor, filterAvailableToday }: { tutor: any; filterAvailableToday?: boolean }) {
+  const { user: currentUser } = useAuth();
   const { data: tutorCourses } = useTutorCourses(tutor.id);
   const { data: availability = [] } = useAvailabilities(tutor.id);
 
@@ -225,7 +227,9 @@ function TutorCard({ tutor, filterAvailableToday }: { tutor: any; filterAvailabl
           </div>
         )}
 
-        <ConnectDialog tutor={tutor} tutorCourses={tutorCourses || []} />
+        {currentUser?.role === "student" && currentUser?.id !== tutor.id && (
+          <ConnectDialog tutor={tutor} tutorCourses={tutorCourses || []} />
+        )}
 
         {/* Report dialog */}
         <Dialog open={reportOpen} onOpenChange={setReportOpen}>
@@ -268,6 +272,8 @@ function TutorCard({ tutor, filterAvailableToday }: { tutor: any; filterAvailabl
 
 function ConnectDialog({ tutor, tutorCourses }: { tutor: any, tutorCourses: any[] }) {
   const [open, setOpen] = useState(false);
+  const { user } = useAuth();
+  const isVerified = !!(user as any)?.isVerified;
   const createSession = useCreateSession();
   const { toast } = useToast();
   const [courseId, setCourseId] = useState("");
@@ -299,9 +305,11 @@ function ConnectDialog({ tutor, tutorCourses }: { tutor: any, tutorCourses: any[
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
-        <Button className="w-full rounded-lg text-xs h-9" size="sm">
-          Connect with {tutor.firstName}
-        </Button>
+        <div title={!isVerified ? "Account verification required (24–48 hrs)" : undefined} className="w-full">
+          <Button className="w-full rounded-lg text-xs h-9" size="sm" disabled={!isVerified}>
+            {isVerified ? `Connect with ${tutor.firstName}` : "Verification Pending"}
+          </Button>
+        </div>
       </DialogTrigger>
       <DialogContent className="sm:max-w-[400px] rounded-xl p-5">
         <DialogHeader className="mb-3">
@@ -365,7 +373,7 @@ function ConnectDialog({ tutor, tutorCourses }: { tutor: any, tutorCourses: any[
           <Button
             className="w-full h-10 rounded-lg text-sm font-semibold"
             onClick={handleSubmit}
-            disabled={createSession.isPending || !courseId}
+            disabled={createSession.isPending || !courseId || !isVerified}
           >
             {createSession.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> :
               recurring ? `Send ${recurringWeeks} Recurring Requests` : "Send Request"}

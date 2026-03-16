@@ -8,7 +8,7 @@ import {
   LogOut, Loader2, Settings, Bell, Moon, Sun, Monitor,
   HelpCircle, X, ChevronRight, ChevronDown, Globe, Info, User, Shield, Menu, FolderOpen, TrendingUp,
   Phone, PhoneOff, Video, MessageSquare, PhoneCall, CalendarCheck, Check, Trash2, Volume2, VolumeX,
-  Brain, Users
+  Brain, Users, Clock
 } from "lucide-react";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Switch } from "@/components/ui/switch";
@@ -555,6 +555,15 @@ export function AppLayout({ children }: { children: ReactNode }) {
             </div>
           </div>
         </header>
+        {!(user as any).isVerified && (
+          <div className="w-full bg-amber-500/10 border-b border-amber-500/20 px-4 py-2.5 flex items-center gap-2.5">
+            <Clock className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400 shrink-0" />
+            <p className="text-xs text-amber-800 dark:text-amber-300 leading-snug flex-1">
+              <span className="font-semibold">Account pending verification.</span>{" "}
+              We review new accounts within 24–48 hours. Booking sessions, joining rooms, and calls are locked until then.
+            </p>
+          </div>
+        )}
         <main className="flex-1 px-4 md:px-6 py-6 max-w-5xl w-full mx-auto">{children}</main>
         <div className="md:hidden fixed bottom-0 left-0 right-0 border-t border-border/60 bg-card/95 backdrop-blur-md pb-safe pt-1 px-1 flex justify-around z-30">
           {navItems.map((item) => {

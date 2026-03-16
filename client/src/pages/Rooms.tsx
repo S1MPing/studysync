@@ -185,7 +185,7 @@ function CreateRoomDialog({
 
 // ─── Room Card ────────────────────────────────────────────────────────────────
 
-function RoomCard({ room, onJoin }: { room: StudyRoom; onJoin: (room: StudyRoom) => void }) {
+function RoomCard({ room, onJoin, isVerified }: { room: StudyRoom; onJoin: (room: StudyRoom) => void; isVerified: boolean }) {
   return (
     <Card className="rounded-xl border-border/60 shadow-sm hover:shadow-md transition-all group">
       <CardContent className="p-5 flex flex-col gap-3">
@@ -233,22 +233,28 @@ function RoomCard({ room, onJoin }: { room: StudyRoom; onJoin: (room: StudyRoom)
         )}
 
         {/* Join button */}
-        <Button
-          size="sm"
-          className="w-full gap-2 mt-1"
-          onClick={() => onJoin(room)}
-          disabled={!room.isOpen}
-        >
-          {room.isOpen ? (
-            <>
-              <Video className="w-3.5 h-3.5" /> Join Room
-            </>
-          ) : (
-            <>
-              <Lock className="w-3.5 h-3.5" /> Closed
-            </>
-          )}
-        </Button>
+        <div title={!isVerified ? "Account verification required (24–48 hrs)" : undefined}>
+          <Button
+            size="sm"
+            className="w-full gap-2 mt-1"
+            onClick={() => onJoin(room)}
+            disabled={!room.isOpen || !isVerified}
+          >
+            {!isVerified ? (
+              <>
+                <Lock className="w-3.5 h-3.5" /> Verification Pending
+              </>
+            ) : room.isOpen ? (
+              <>
+                <Video className="w-3.5 h-3.5" /> Join Room
+              </>
+            ) : (
+              <>
+                <Lock className="w-3.5 h-3.5" /> Closed
+              </>
+            )}
+          </Button>
+        </div>
       </CardContent>
     </Card>
   );
@@ -263,6 +269,7 @@ export function Rooms() {
   const [activeRoom, setActiveRoom] = useState<StudyRoom | null>(null);
 
   const isTutorOrBoth = user && ((user as any).role === "tutor" || (user as any).role === "both");
+  const isVerified = !!(user as any)?.isVerified;
 
   const openRooms = (rooms || []).filter((r) => r.isOpen);
   const closedRooms = (rooms || []).filter((r) => !r.isOpen);
@@ -301,9 +308,11 @@ export function Rooms() {
           </p>
         </div>
         {isTutorOrBoth && (
-          <Button onClick={() => setCreateOpen(true)} className="gap-2 shrink-0">
-            <Plus className="w-4 h-4" /> Create Room
-          </Button>
+          <div title={!isVerified ? "Account verification required (24–48 hrs)" : undefined}>
+            <Button onClick={() => setCreateOpen(true)} className="gap-2 shrink-0" disabled={!isVerified}>
+              <Plus className="w-4 h-4" /> Create Room
+            </Button>
+          </div>
         )}
       </div>
 
@@ -330,9 +339,11 @@ export function Rooms() {
             Be the first to open a live study room and invite others to join!
           </p>
           {isTutorOrBoth && (
-            <Button size="sm" className="mt-4 gap-2" onClick={() => setCreateOpen(true)}>
-              <Plus className="w-4 h-4" /> Create Room
-            </Button>
+            <div title={!isVerified ? "Account verification required (24–48 hrs)" : undefined}>
+              <Button size="sm" className="mt-4 gap-2" onClick={() => setCreateOpen(true)} disabled={!isVerified}>
+                <Plus className="w-4 h-4" /> Create Room
+              </Button>
+            </div>
           )}
         </div>
       ) : (
@@ -363,7 +374,7 @@ export function Rooms() {
                     key={room.id}
                     variants={{ hidden: { opacity: 0, y: 10 }, show: { opacity: 1, y: 0 } }}
                   >
-                    <RoomCard room={room} onJoin={setActiveRoom} />
+                    <RoomCard room={room} onJoin={setActiveRoom} isVerified={isVerified} />
                   </motion.div>
                 ))}
               </motion.div>
@@ -385,7 +396,7 @@ export function Rooms() {
                     key={room.id}
                     variants={{ hidden: { opacity: 0, y: 10 }, show: { opacity: 1, y: 0 } }}
                   >
-                    <RoomCard room={room} onJoin={setActiveRoom} />
+                    <RoomCard room={room} onJoin={setActiveRoom} isVerified={isVerified} />
                   </motion.div>
                 ))}
               </motion.div>
