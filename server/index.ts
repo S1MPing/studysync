@@ -9,6 +9,9 @@ import connectPg from "connect-pg-simple";
 const app = express();
 const httpServer = createServer(app);
 
+// Trust Render/Railway/Heroku reverse proxy so secure cookies work over HTTPS
+app.set("trust proxy", 1);
+
 declare module "http" {
   interface IncomingMessage {
     rawBody: unknown;
