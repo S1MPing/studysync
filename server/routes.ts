@@ -261,6 +261,17 @@ export async function registerRoutes(
         }
       }
 
+      // Notify tutor via WebSocket + email about new session request
+      try {
+        const student = await storage.getUser(sessionData.studentId);
+        const studentName = student ? `${student.firstName || ""} ${student.lastName || ""}`.trim() : "A student";
+        broadcastToUser(sessionData.tutorId, {
+          type: "session-request",
+          sessionId: session.id,
+          studentName,
+        });
+      } catch {}
+
       // Email the tutor about the new request
       try {
         const tutor = await storage.getUser(sessionData.tutorId);
@@ -318,8 +329,10 @@ export async function registerRoutes(
 
       // Notify both parties via WebSocket so they don't need to refresh
       try {
-        broadcastToUser(session.studentId, { type: "session-update", sessionId });
-        broadcastToUser(session.tutorId, { type: "session-update", sessionId });
+        const actor = await storage.getUser(req.userId);
+        const actorName = actor ? `${actor.firstName || ""} ${actor.lastName || ""}`.trim() : "Someone";
+        broadcastToUser(session.studentId, { type: "session-update", sessionId, status: input.status, actorName });
+        broadcastToUser(session.tutorId, { type: "session-update", sessionId, status: input.status, actorName });
       } catch {}
 
       res.json(updated);
@@ -443,18 +456,30 @@ export async function registerRoutes(
         senderId: req.userId,
       });
 
-      // Email the other party (throttled — only for text messages to avoid spam)
-      if (input.type === "text") {
-        try {
-          const otherId = session.studentId === req.userId ? session.tutorId : session.studentId;
+      // Notify the other party via WebSocket and email
+      try {
+        const otherId = session.studentId === req.userId ? session.tutorId : session.studentId;
+        const sender = await storage.getUser(req.userId);
+        const senderName = sender ? `${sender.firstName || ""} ${sender.lastName || ""}`.trim() : "Someone";
+
+        // WebSocket notification to the other person
+        broadcastToUser(otherId, {
+          type: "message-notification",
+          sessionId,
+          senderName,
+          preview: input.type === "text" ? (input.content || "").slice(0, 80) : input.type === "file" ? "Sent a file" : "Sent a message",
+          messageType: input.type,
+        });
+
+        // Email for text messages only
+        if (input.type === "text") {
           const other = await storage.getUser(otherId);
-          const sender = await storage.getUser(req.userId);
           const course = (await db.select().from(courses).where(eq(courses.id, session.courseId)))[0];
           if (other?.email && sender && course) {
-            notifyNewMessage(other.email, other.firstName || "", `${sender.firstName} ${sender.lastName}`, course.code).catch(() => {});
+            notifyNewMessage(other.email, other.firstName || "", senderName, course.code).catch(() => {});
           }
-        } catch {}
-      }
+        }
+      } catch {}
 
       res.status(201).json(message);
     } catch (err) {

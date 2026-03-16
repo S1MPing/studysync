@@ -3,10 +3,10 @@ import { Link, useLocation } from "wouter";
 import { useAuth } from "@/hooks/use-auth";
 import { useI18n, languageNames, type Language } from "@/lib/i18n";
 import {
-  GraduationCap, LayoutDashboard, Search, Calendar,
+  LayoutDashboard, Search, Calendar,
   LogOut, Loader2, Settings, Bell, Moon, Sun, Monitor,
   HelpCircle, X, ChevronRight, ChevronDown, Globe, Info, User, Shield, Menu, FolderOpen, TrendingUp,
-  Phone, PhoneOff, Video
+  Phone, PhoneOff, Video, MessageSquare, PhoneCall, CalendarCheck, Check, Trash2
 } from "lucide-react";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Switch } from "@/components/ui/switch";
@@ -14,6 +14,8 @@ import { motion, AnimatePresence } from "framer-motion";
 import { useQuery } from "@tanstack/react-query";
 import { useIncomingCall } from "@/hooks/use-incoming-call";
 import { useGlobalRealtime } from "@/hooks/use-global-ws";
+import { useNotifications, type AppNotification } from "@/hooks/use-notifications";
+import { formatDistanceToNow } from "date-fns";
 
 type ThemeMode = "light" | "dark" | "system";
 
@@ -29,9 +31,11 @@ export function AppLayout({ children }: { children: ReactNode }) {
   const { user, logout, isLoggingOut } = useAuth();
   const { t, language, setLanguage } = useI18n();
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [notifOpen, setNotifOpen] = useState(false);
   const [langOpen, setLangOpen] = useState(false);
   const [themeOpen, setThemeOpen] = useState(false);
-  const [notifications, setNotifications] = useState(true);
+  const [notifSettingsOpen, setNotifSettingsOpen] = useState(false);
+  const { notifications: appNotifs, unreadCount: notifCount, prefs: notifPrefs, addNotification, markRead, markAllRead, clearAll, updatePrefs } = useNotifications();
   const [theme, setThemeState] = useState<ThemeMode>(() =>
     (typeof window !== "undefined" ? localStorage.getItem("studysync-theme") as ThemeMode : null) || "light"
   );
@@ -97,8 +101,8 @@ export function AppLayout({ children }: { children: ReactNode }) {
     } catch { return 0; }
   })();
 
-  const { incomingCall, answerCall, declineCall } = useIncomingCall(user?.id);
-  useGlobalRealtime(user?.id);
+  const { incomingCall, answerCall, declineCall } = useIncomingCall(user?.id, addNotification);
+  useGlobalRealtime(user?.id, addNotification);
 
   if (!user) return <>{children}</>;
   const initials = `${user.firstName?.[0] || ""}${user.lastName?.[0] || ""}`.toUpperCase() || user.email?.charAt(0).toUpperCase() || "?";
@@ -106,6 +110,74 @@ export function AppLayout({ children }: { children: ReactNode }) {
 
   return (
     <div className="min-h-screen flex bg-background">
+      {/* Notification Panel */}
+      <AnimatePresence>
+        {notifOpen && (
+          <>
+            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+              onClick={() => setNotifOpen(false)} className="fixed inset-0 bg-black/20 z-40 backdrop-blur-[2px]" />
+            <motion.div initial={{ x: 300, opacity: 0 }} animate={{ x: 0, opacity: 1 }} exit={{ x: 300, opacity: 0 }}
+              transition={{ type: "spring", damping: 30, stiffness: 320 }}
+              className="fixed right-0 top-0 h-full w-80 max-w-[100vw] bg-card border-l border-border/60 shadow-xl z-50 flex flex-col">
+              <div className="flex items-center justify-between px-4 py-4 border-b border-border/50">
+                <div className="flex items-center gap-2">
+                  <h2 className="text-sm font-semibold">Notifications</h2>
+                  {notifCount > 0 && <span className="bg-destructive text-white text-[9px] font-bold rounded-full min-w-[18px] h-4 flex items-center justify-center px-1">{notifCount}</span>}
+                </div>
+                <div className="flex items-center gap-1">
+                  {appNotifs.length > 0 && (
+                    <>
+                      <button onClick={markAllRead} className="w-7 h-7 rounded-md hover:bg-muted flex items-center justify-center text-muted-foreground" title="Mark all read">
+                        <Check className="w-3.5 h-3.5" />
+                      </button>
+                      <button onClick={clearAll} className="w-7 h-7 rounded-md hover:bg-muted flex items-center justify-center text-muted-foreground" title="Clear all">
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    </>
+                  )}
+                  <button onClick={() => setNotifOpen(false)} className="w-7 h-7 rounded-md hover:bg-muted flex items-center justify-center text-muted-foreground">
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              </div>
+              <div className="flex-1 overflow-y-auto">
+                {appNotifs.length === 0 ? (
+                  <div className="flex flex-col items-center justify-center h-48 text-muted-foreground gap-2">
+                    <Bell className="w-8 h-8 opacity-30" />
+                    <p className="text-xs">No notifications yet</p>
+                  </div>
+                ) : (
+                  <div className="divide-y divide-border/50">
+                    {appNotifs.map((n) => {
+                      const Icon = n.type === "message" ? MessageSquare : n.type === "call" ? PhoneCall : CalendarCheck;
+                      const iconColor = n.type === "message" ? "text-blue-500" : n.type === "call" ? "text-green-500" : "text-primary";
+                      const iconBg = n.type === "message" ? "bg-blue-500/10" : n.type === "call" ? "bg-green-500/10" : "bg-primary/10";
+                      return (
+                        <button key={n.id}
+                          onClick={() => { markRead(n.id); if (n.sessionId) { setNotifOpen(false); window.location.href = `/sessions/${n.sessionId}`; } }}
+                          className={`w-full flex items-start gap-3 px-4 py-3 text-left transition-colors hover:bg-muted/50 ${n.read ? "opacity-60" : ""}`}>
+                          <div className={`w-8 h-8 rounded-full ${iconBg} flex items-center justify-center shrink-0 mt-0.5`}>
+                            <Icon className={`w-4 h-4 ${iconColor}`} />
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center justify-between gap-1 mb-0.5">
+                              <p className="text-xs font-semibold truncate">{n.title}</p>
+                              {!n.read && <span className="w-1.5 h-1.5 rounded-full bg-primary shrink-0" />}
+                            </div>
+                            <p className="text-[11px] text-muted-foreground leading-snug line-clamp-2">{n.body}</p>
+                            <p className="text-[10px] text-muted-foreground/60 mt-0.5">{formatDistanceToNow(new Date(n.timestamp), { addSuffix: true })}</p>
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            </motion.div>
+          </>
+        )}
+      </AnimatePresence>
+
       {/* Incoming call overlay */}
       <AnimatePresence>
         {incomingCall && (
@@ -115,15 +187,20 @@ export function AppLayout({ children }: { children: ReactNode }) {
             exit={{ opacity: 0, y: -20 }}
             className="fixed top-4 left-1/2 -translate-x-1/2 z-[100] w-[calc(100%-2rem)] max-w-sm"
           >
-            <div className="bg-zinc-900 text-white rounded-2xl shadow-2xl p-4 flex items-center gap-3">
+            <div
+              className="bg-zinc-900 text-white rounded-2xl shadow-2xl p-4 flex items-center gap-3 cursor-pointer active:scale-[0.98] transition-transform"
+              onClick={() => answerCall(incomingCall)}
+              role="button"
+              aria-label={`Answer ${incomingCall.mode} call from ${incomingCall.callerName}`}
+            >
               <div className="w-10 h-10 rounded-full bg-primary/20 flex items-center justify-center shrink-0 animate-pulse">
                 {incomingCall.mode === "video" ? <Video className="w-5 h-5 text-primary" /> : <Phone className="w-5 h-5 text-primary" />}
               </div>
               <div className="flex-1 min-w-0">
-                <p className="text-xs text-zinc-400">{incomingCall.mode === "video" ? "Incoming video call" : "Incoming audio call"}</p>
+                <p className="text-xs text-zinc-400">{incomingCall.mode === "video" ? "Incoming video call" : "Incoming audio call"} — tap to answer</p>
                 <p className="font-semibold text-sm truncate">{incomingCall.callerName}</p>
               </div>
-              <div className="flex gap-2 shrink-0">
+              <div className="flex gap-2 shrink-0" onClick={(e) => e.stopPropagation()}>
                 <button
                   onClick={() => declineCall()}
                   className="w-9 h-9 rounded-full bg-red-500 hover:bg-red-600 flex items-center justify-center transition-colors"
@@ -150,9 +227,15 @@ export function AppLayout({ children }: { children: ReactNode }) {
             <img src="/favicon-96x96.png" alt="StudySync" className="w-7 h-7" />
             <span className="text-base font-bold tracking-tight">StudySync</span>
           </a>
-          <button onClick={() => setSettingsOpen(true)} className="w-7 h-7 rounded-md hover:bg-muted flex items-center justify-center text-muted-foreground" title="Menu">
-            <Menu className="w-4 h-4" />
-          </button>
+          <div className="flex items-center gap-1">
+            <button onClick={() => setNotifOpen(true)} className="relative w-7 h-7 rounded-md hover:bg-muted flex items-center justify-center text-muted-foreground" title="Notifications">
+              <Bell className="w-4 h-4" />
+              {notifCount > 0 && <span className="absolute -top-0.5 -right-0.5 w-3.5 h-3.5 bg-destructive text-white text-[8px] font-bold rounded-full flex items-center justify-center">{notifCount > 9 ? "9+" : notifCount}</span>}
+            </button>
+            <button onClick={() => setSettingsOpen(true)} className="w-7 h-7 rounded-md hover:bg-muted flex items-center justify-center text-muted-foreground" title="Menu">
+              <Menu className="w-4 h-4" />
+            </button>
+          </div>
         </div>
         <nav className="flex-1 px-2.5 py-3 space-y-0.5">
           {navItems.map((item) => {
@@ -219,16 +302,49 @@ export function AppLayout({ children }: { children: ReactNode }) {
               </div>
 
               <div className="flex-1 px-2.5 py-3 space-y-0.5 overflow-y-auto">
-                {/* Notifications */}
-                <div className="flex items-center justify-between px-3 py-2.5 rounded-lg hover:bg-muted/50 transition-colors">
-                  <div className="flex items-center gap-2.5">
-                    <div className="w-7 h-7 rounded-md bg-blue-500/8 flex items-center justify-center"><Bell className="w-3.5 h-3.5 text-blue-600" /></div>
-                    <div>
-                      <p className="text-xs font-medium">{t("settings.notifications")}</p>
-                      <p className="text-[10px] text-muted-foreground">{notifications ? t("settings.enabled") : t("settings.disabled")}</p>
+                {/* Notifications master toggle */}
+                <div className="px-1">
+                  <div className="flex items-center justify-between px-2 py-2.5 rounded-lg hover:bg-muted/50 transition-colors">
+                    <div className="flex items-center gap-2.5">
+                      <div className="w-7 h-7 rounded-md bg-blue-500/8 flex items-center justify-center"><Bell className="w-3.5 h-3.5 text-blue-600" /></div>
+                      <div>
+                        <p className="text-xs font-medium">{t("settings.notifications")}</p>
+                        <p className="text-[10px] text-muted-foreground">{notifPrefs.enabled ? "All on" : "All off"}</p>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <button onClick={() => setNotifSettingsOpen(!notifSettingsOpen)} className="text-muted-foreground">
+                        <ChevronDown className={`w-3.5 h-3.5 transition-transform ${notifSettingsOpen ? "rotate-180" : ""}`} />
+                      </button>
+                      <Switch checked={notifPrefs.enabled} onCheckedChange={(v) => updatePrefs({ enabled: v, messages: v, calls: v, sessionRequests: v, sessionUpdates: v })} />
                     </div>
                   </div>
-                  <Switch checked={notifications} onCheckedChange={setNotifications} />
+                  <AnimatePresence>
+                    {notifSettingsOpen && (
+                      <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: "auto", opacity: 1 }} exit={{ height: 0, opacity: 0 }}
+                        transition={{ duration: 0.15 }} className="overflow-hidden">
+                        <div className="space-y-0.5 pb-1 pl-9 pr-2">
+                          {([
+                            { key: "messages", icon: MessageSquare, label: "Messages", color: "text-blue-500" },
+                            { key: "calls", icon: PhoneCall, label: "Calls", color: "text-green-500" },
+                            { key: "sessionRequests", icon: CalendarCheck, label: "Session Requests", color: "text-primary" },
+                            { key: "sessionUpdates", icon: CalendarCheck, label: "Session Updates", color: "text-primary" },
+                          ] as const).map(({ key, icon: Icon, label, color }) => (
+                            <div key={key} className="flex items-center justify-between px-2 py-1.5 rounded-md hover:bg-muted/50">
+                              <div className="flex items-center gap-2">
+                                <Icon className={`w-3 h-3 ${color}`} />
+                                <span className="text-xs text-muted-foreground">{label}</span>
+                              </div>
+                              <Switch
+                                checked={notifPrefs[key]}
+                                onCheckedChange={(v) => updatePrefs({ [key]: v, enabled: v || notifPrefs.messages || notifPrefs.calls || notifPrefs.sessionRequests || notifPrefs.sessionUpdates })}
+                              />
+                            </div>
+                          ))}
+                        </div>
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
                 </div>
 
                 {/* Theme dropdown */}
@@ -352,9 +468,15 @@ export function AppLayout({ children }: { children: ReactNode }) {
               <img src="/favicon-96x96.png" alt="StudySync" className="w-6 h-6" />
               <span className="text-sm font-bold">StudySync</span>
             </a>
-            <button onClick={() => setSettingsOpen(true)} className="w-7 h-7 rounded-md hover:bg-muted flex items-center justify-center text-muted-foreground">
-              <Menu className="w-4 h-4" />
-            </button>
+            <div className="flex items-center gap-1">
+              <button onClick={() => setNotifOpen(true)} className="relative w-7 h-7 rounded-md hover:bg-muted flex items-center justify-center text-muted-foreground">
+                <Bell className="w-4 h-4" />
+                {notifCount > 0 && <span className="absolute -top-0.5 -right-0.5 w-3.5 h-3.5 bg-destructive text-white text-[8px] font-bold rounded-full flex items-center justify-center">{notifCount > 9 ? "9+" : notifCount}</span>}
+              </button>
+              <button onClick={() => setSettingsOpen(true)} className="w-7 h-7 rounded-md hover:bg-muted flex items-center justify-center text-muted-foreground">
+                <Menu className="w-4 h-4" />
+              </button>
+            </div>
           </div>
         </header>
         <main className="flex-1 px-4 md:px-6 py-6 max-w-5xl w-full mx-auto">{children}</main>

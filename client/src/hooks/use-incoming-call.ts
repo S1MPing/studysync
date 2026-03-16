@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { firestore } from "@/lib/firebase";
 import { collection, query, where, onSnapshot, updateDoc, doc } from "firebase/firestore";
+import type { AppNotification } from "./use-notifications";
 
 export interface IncomingCall {
   roomId: string;
@@ -51,8 +52,12 @@ function useRingTone(active: boolean) {
   }, [active]);
 }
 
-export function useIncomingCall(userId: string | undefined) {
+type AddNotif = (n: Omit<AppNotification, "id" | "timestamp" | "read">) => void;
+
+export function useIncomingCall(userId: string | undefined, addNotification?: AddNotif) {
   const [incomingCall, setIncomingCall] = useState<IncomingCall | null>(null);
+  const addNotifRef = useRef(addNotification);
+  useEffect(() => { addNotifRef.current = addNotification; }, [addNotification]);
 
   useRingTone(!!incomingCall);
 
@@ -83,11 +88,18 @@ export function useIncomingCall(userId: string | undefined) {
       const roomId = docSnap.id;
       const sessionId = parseInt(roomId.replace("session-", ""), 10);
 
-      setIncomingCall({
+      const call: IncomingCall = {
         roomId,
         sessionId,
         callerName: data.callerName || "Someone",
         mode: data.mode || "video",
+      };
+      setIncomingCall(call);
+      addNotifRef.current?.({
+        type: "call",
+        title: `Incoming ${call.mode} call`,
+        body: `${call.callerName} is calling you`,
+        sessionId: call.sessionId,
       });
     });
 
