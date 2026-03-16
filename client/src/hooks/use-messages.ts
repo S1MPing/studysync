@@ -1,5 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useRef, useCallback } from "react";
+import { useEffect, useRef, useCallback, useState } from "react";
 import { api, buildUrl } from "@shared/routes";
 import { z } from "zod";
 
@@ -24,6 +24,14 @@ export function useMessages(sessionId: number) {
 export function useRealtimeMessages(sessionId: number, userId: string) {
   const queryClient = useQueryClient();
   const wsRef = useRef<WebSocket | null>(null);
+  const [partnerTyping, setPartnerTyping] = useState(false);
+  const [partnerRead, setPartnerRead] = useState(false);
+  const typingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Stable refs for state setters so they can be used in WS callbacks without closure issues
+  const setTypingRef = useRef(setPartnerTyping);
+  const setReadRef = useRef(setPartnerRead);
+  const typingTimerRefInner = useRef(typingTimerRef);
 
   useEffect(() => {
     if (!sessionId || !userId) return;
@@ -39,21 +47,24 @@ export function useRealtimeMessages(sessionId: number, userId: string) {
       try {
         const msg = JSON.parse(event.data);
         if (msg.type === "chat") {
-          // Add the new message to the cache
           queryClient.setQueryData(
             [api.messages.list.path, sessionId],
             (old: any[] | undefined) => old ? [...old, msg.data] : [msg.data]
           );
+        } else if (msg.type === "typing") {
+          setTypingRef.current(true);
+          const timer = typingTimerRefInner.current;
+          if (timer.current) clearTimeout(timer.current);
+          timer.current = setTimeout(() => setTypingRef.current(false), 3500);
+        } else if (msg.type === "read") {
+          setReadRef.current(true);
         }
       } catch {}
     };
 
     ws.onclose = () => {
-      // Reconnect after 2 seconds
       setTimeout(() => {
-        if (wsRef.current === ws) {
-          wsRef.current = null;
-        }
+        if (wsRef.current === ws) wsRef.current = null;
       }, 2000);
     };
 
@@ -65,14 +76,23 @@ export function useRealtimeMessages(sessionId: number, userId: string) {
 
   const broadcastMessage = useCallback((messageData: any) => {
     if (wsRef.current?.readyState === WebSocket.OPEN) {
-      wsRef.current.send(JSON.stringify({
-        type: "chat",
-        data: messageData,
-      }));
+      wsRef.current.send(JSON.stringify({ type: "chat", data: messageData }));
     }
   }, []);
 
-  return { broadcastMessage };
+  const sendTyping = useCallback(() => {
+    if (wsRef.current?.readyState === WebSocket.OPEN) {
+      wsRef.current.send(JSON.stringify({ type: "typing", userId }));
+    }
+  }, [userId]);
+
+  const sendRead = useCallback(() => {
+    if (wsRef.current?.readyState === WebSocket.OPEN) {
+      wsRef.current.send(JSON.stringify({ type: "read", userId }));
+    }
+  }, [userId]);
+
+  return { broadcastMessage, sendTyping, sendRead, partnerTyping, partnerRead };
 }
 
 export function useSendMessage() {

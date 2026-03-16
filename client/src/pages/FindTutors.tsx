@@ -13,13 +13,21 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
-import { Search, Star, BookOpen, MapPin, Loader2, MoreVertical, Ban, Flag } from "lucide-react";
+import { Search, Star, BookOpen, MapPin, Loader2, MoreVertical, Ban, Flag, Clock, Zap } from "lucide-react";
+import { useAvailabilities } from "@/hooks/use-tutor";
 import { useToast } from "@/hooks/use-toast";
 import { useMutation } from "@tanstack/react-query";
+
+// dayOfWeek: 1=Mon, 2=Tue, ..., 7=Sun (matches DB schema)
+function jsToDbDay(jsDay: number) {
+  // JS: 0=Sun, 1=Mon...6=Sat → DB: 1=Mon..7=Sun
+  return jsDay === 0 ? 7 : jsDay;
+}
 
 export function FindTutors() {
   const [courseFilter, setCourseFilter] = useState<string>("");
   const [nameSearch, setNameSearch] = useState<string>("");
+  const [availableToday, setAvailableToday] = useState(false);
   const { data: tutors, isLoading: tutorsLoading } = useTutors({ courseId: courseFilter === "all" ? "" : courseFilter });
   const { data: courses } = useCourses();
   const { t } = useI18n();
@@ -67,6 +75,17 @@ export function FindTutors() {
                 </SelectContent>
               </Select>
             </div>
+            <button
+              onClick={() => setAvailableToday(v => !v)}
+              className={`flex items-center gap-1.5 px-3 h-10 rounded-lg text-xs font-semibold transition-all whitespace-nowrap ${
+                availableToday
+                  ? "bg-emerald-500 text-white"
+                  : "bg-card text-foreground hover:bg-white/90"
+              }`}
+            >
+              <Zap className="w-3.5 h-3.5" />
+              Available Today
+            </button>
           </div>
         </div>
       </div>
@@ -84,7 +103,7 @@ export function FindTutors() {
           </div>
         ) : (
           filteredTutors?.map((tutor) => (
-            <TutorCard key={tutor.id} tutor={tutor} />
+            <TutorCard key={tutor.id} tutor={tutor} filterAvailableToday={availableToday} />
           ))
         )}
       </div>
@@ -92,8 +111,23 @@ export function FindTutors() {
   );
 }
 
-function TutorCard({ tutor }: { tutor: any }) {
+function TutorCard({ tutor, filterAvailableToday }: { tutor: any; filterAvailableToday?: boolean }) {
   const { data: tutorCourses } = useTutorCourses(tutor.id);
+  const { data: availability = [] } = useAvailabilities(tutor.id);
+
+  const todayDbDay = jsToDbDay(new Date().getDay());
+  const currentHour = new Date().getHours();
+
+  const todaySlots = (availability as any[]).filter(s => s.dayOfWeek === todayDbDay);
+  const isAvailableToday = todaySlots.length > 0;
+  const isAvailableNow = todaySlots.some(s => {
+    const startH = parseInt(s.startTime.split(":")[0]);
+    const endH = parseInt(s.endTime.split(":")[0]);
+    return currentHour >= startH && currentHour < endH;
+  });
+
+  // If filter is active, hide tutors without today's availability
+  if (filterAvailableToday && !isAvailableToday) return null;
   const { toast } = useToast();
   const [reportOpen, setReportOpen] = useState(false);
   const [reportReason, setReportReason] = useState("harassment");
@@ -157,12 +191,27 @@ function TutorCard({ tutor }: { tutor: any }) {
           </div>
         </div>
 
-        <h3 className="text-sm font-bold">{tutor.firstName} {tutor.lastName}</h3>
-        <p className="text-xs text-muted-foreground flex items-center gap-1 mt-0.5 mb-3">
+        <div className="flex items-center gap-2 flex-wrap">
+          <h3 className="text-sm font-bold">{tutor.firstName} {tutor.lastName}</h3>
+          {isAvailableNow && (
+            <span className="text-[9px] font-bold bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 px-1.5 py-0.5 rounded-full flex items-center gap-0.5">
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse inline-block" /> Available Now
+            </span>
+          )}
+        </div>
+        <p className="text-xs text-muted-foreground flex items-center gap-1 mt-0.5 mb-2">
           <MapPin className="w-3 h-3" /> {tutor.university} · Lvl {tutor.level}
         </p>
+        {isAvailableToday && !isAvailableNow && (
+          <div className="flex items-center gap-1 mb-2">
+            <Clock className="w-3 h-3 text-blue-500" />
+            <span className="text-[10px] text-blue-600 dark:text-blue-400 font-medium">
+              Available today: {todaySlots.map((s: any) => `${s.startTime}–${s.endTime}`).join(", ")}
+            </span>
+          </div>
+        )}
 
-        <p className="text-xs text-muted-foreground line-clamp-2 mb-3 min-h-[2rem]">{tutor.bio || "Peer tutor ready to help you succeed!"}</p>
+        <p className="text-xs text-muted-foreground line-clamp-2 mb-3">{tutor.bio || "Peer tutor ready to help you succeed!"}</p>
 
         {tutorCourses && tutorCourses.length > 0 && (
           <div className="mb-4 flex flex-wrap gap-1.5">

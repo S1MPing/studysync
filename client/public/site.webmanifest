@@ -1,11 +1,11 @@
 {
-  "name": "Your Application Name",
-  "short_name": "App",
-  "description": "Application description",
-  "start_url": "/",
+  "name": "StudySync",
+  "short_name": "StudySync",
+  "description": "Peer-to-peer tutoring platform for university students",
+  "start_url": "/dashboard",
   "display": "standalone",
-  "background_color": "#ffffff",
-  "theme_color": "#ffffff",
+  "background_color": "#0f172a",
+  "theme_color": "#6366f1",
   "orientation": "portrait-primary",
   "icons": [
     {

@@ -73,8 +73,11 @@ export function useVideoCall(sessionId: number) {
   const [callMode, setCallMode] = useState<CallMode>("video");
   const [isMuted, setIsMuted] = useState(false);
   const [isVideoOff, setIsVideoOff] = useState(false);
+  const [isScreenSharing, setIsScreenSharing] = useState(false);
   const [minimized, setMinimized] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const screenStreamRef = useRef<MediaStream | null>(null);
 
   // Ring tone plays for caller while waiting
   useRingTone(callState === "waiting");
@@ -110,6 +113,8 @@ export function useVideoCall(sessionId: number) {
 
     localStreamRef.current?.getTracks().forEach(t => t.stop());
     localStreamRef.current = null;
+    screenStreamRef.current?.getTracks().forEach(t => t.stop());
+    screenStreamRef.current = null;
 
     if (pcRef.current) {
       pcRef.current.ontrack = null;
@@ -358,13 +363,62 @@ export function useVideoCall(sessionId: number) {
     if (track) { track.enabled = !track.enabled; setIsVideoOff(!track.enabled); }
   }, []);
 
+  const toggleScreenShare = useCallback(async () => {
+    const pc = pcRef.current;
+    if (!pc) return;
+
+    if (isScreenSharing) {
+      // Stop screen share, restore camera
+      screenStreamRef.current?.getTracks().forEach(t => t.stop());
+      screenStreamRef.current = null;
+      setIsScreenSharing(false);
+
+      const cameraTrack = localStreamRef.current?.getVideoTracks()[0];
+      if (cameraTrack) {
+        const sender = pc.getSenders().find(s => s.track?.kind === "video");
+        if (sender) {
+          try { await sender.replaceTrack(cameraTrack); } catch {}
+        }
+        if (localVideoRef.current) localVideoRef.current.srcObject = localStreamRef.current;
+      }
+    } else {
+      try {
+        const screenStream = await (navigator.mediaDevices as any).getDisplayMedia({ video: true, audio: false });
+        screenStreamRef.current = screenStream;
+        const screenTrack = screenStream.getVideoTracks()[0];
+
+        const sender = pc.getSenders().find(s => s.track?.kind === "video");
+        if (sender) {
+          await sender.replaceTrack(screenTrack);
+        }
+        if (localVideoRef.current) localVideoRef.current.srcObject = screenStream;
+
+        setIsScreenSharing(true);
+
+        // Auto-stop when user clicks browser's "Stop sharing"
+        screenTrack.onended = () => {
+          setIsScreenSharing(false);
+          screenStreamRef.current = null;
+          const cameraTrack2 = localStreamRef.current?.getVideoTracks()[0];
+          if (cameraTrack2 && pc.connectionState !== "closed") {
+            const s2 = pc.getSenders().find(s => s.track?.kind === "video");
+            if (s2) s2.replaceTrack(cameraTrack2).catch(() => {});
+          }
+          if (localVideoRef.current) localVideoRef.current.srcObject = localStreamRef.current;
+        };
+      } catch (err: any) {
+        if (err.name !== "NotAllowedError") setError("Screen share failed: " + err.message);
+      }
+    }
+  }, [isScreenSharing]);
+
   useEffect(() => { return () => cleanup(); }, [cleanup]);
 
   return {
     callState, callPhase, callDuration, callMode,
-    isMuted, isVideoOff, minimized, error,
+    isMuted, isVideoOff, isScreenSharing, minimized, error,
     localVideoRef, remoteVideoRef, remoteAudioRef,
-    startCall, endCall, toggleMute, toggleVideo,
+    startCall, endCall, toggleMute, toggleVideo, toggleScreenShare,
     setMinimized,
     formatDuration,
   };

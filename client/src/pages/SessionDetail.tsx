@@ -12,7 +12,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useToast } from "@/hooks/use-toast";
 import {
   Send, Loader2, ArrowLeft, Video, VideoOff, Phone,
-  Mic, MicOff, PhoneOff, CalendarPlus, Minimize2, Maximize2, X, Check, Paperclip, Edit3, Save, Lock, Signal, PhoneCall
+  Mic, MicOff, PhoneOff, CalendarPlus, Minimize2, Maximize2, X, Check, Paperclip, Edit3, Save, Lock, Signal, PhoneCall, Monitor, MonitorOff, FileDown, CheckCheck
 } from "lucide-react";
 import { format } from "date-fns";
 
@@ -24,7 +24,7 @@ export function SessionDetail() {
   const { data: session, isLoading: sessionLoading } = useSession(sessionId);
   const { data: messages = [] } = useMessages(sessionId);
   const sendMessage = useSendMessage();
-  const { broadcastMessage } = useRealtimeMessages(sessionId, user?.id || "");
+  const { broadcastMessage, sendTyping, partnerTyping, partnerRead } = useRealtimeMessages(sessionId, user?.id || "");
   const deleteMessage = useDeleteMessage(sessionId);
   const scheduleSession = useScheduleSession();
   const updateStatus = useUpdateSessionStatus();
@@ -57,6 +57,7 @@ export function SessionDetail() {
   const [uploadingFile, setUploadingFile] = useState(false);
   const [editingNotes, setEditingNotes] = useState(false);
   const [notesValue, setNotesValue] = useState("");
+  const typingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const { toast } = useToast();
   const queryClient = useQueryClient();
 
@@ -102,6 +103,37 @@ export function SessionDetail() {
   const isInCall = call.callState !== "idle" && call.callState !== "ended";
   const myName = [user?.firstName, user?.lastName].filter(Boolean).join(" ") || "Unknown";
   const handleStartCall = (mode: CallMode) => call.startCall(mode, otherPerson?.id, myName);
+
+  const handleTyping = () => {
+    sendTyping();
+    if (typingTimerRef.current) clearTimeout(typingTimerRef.current);
+    typingTimerRef.current = setTimeout(() => {}, 3000);
+  };
+
+  const exportNotesPDF = () => {
+    const w = window.open("", "_blank");
+    if (!w) return;
+    const notes = session.notes || "No notes for this session.";
+    const title = session.course?.code || `Session #${sessionId}`;
+    const date = session.date ? format(new Date(session.date), "MMMM dd, yyyy") : "Date TBD";
+    const participant = otherPerson ? `${otherPerson.firstName} ${otherPerson.lastName}` : "Unknown";
+    const msgLines = messages.map((m: any) => {
+      const senderName = m.senderId === user?.id ? (user?.firstName || "Me") : (otherPerson?.firstName || "Other");
+      const time = m.createdAt ? format(new Date(m.createdAt), "h:mm a") : "";
+      if (m.type === "text") return `<p style="margin:4px 0"><b>${senderName}</b> <span style="color:#888;font-size:11px">${time}</span><br/>${m.content}</p>`;
+      return `<p style="margin:4px 0"><b>${senderName}</b> <span style="color:#888;font-size:11px">${time}</span><br/>[${m.type} attachment]</p>`;
+    }).join("<hr style='border:none;border-top:1px solid #eee;margin:4px 0'/>");
+    w.document.write(`<!DOCTYPE html><html><head><title>${title} – Notes</title>
+      <style>body{font-family:system-ui,sans-serif;max-width:700px;margin:40px auto;color:#1e293b}h1{font-size:20px;border-bottom:2px solid #6366f1;padding-bottom:8px}h2{font-size:14px;color:#6366f1;margin-top:20px}p{font-size:13px;line-height:1.6}.meta{color:#64748b;font-size:12px}</style>
+      </head><body>
+      <h1>StudySync – Session Notes</h1>
+      <p class="meta"><b>Course:</b> ${title} &nbsp;|&nbsp; <b>Date:</b> ${date} &nbsp;|&nbsp; <b>${isTutor ? "Student" : "Tutor"}:</b> ${participant}</p>
+      <h2>Session Notes</h2><p>${notes.replace(/\n/g, "<br/>")}</p>
+      <h2>Chat Messages</h2>${msgLines || "<p>No messages.</p>"}
+      <script>window.print();window.onafterprint=function(){window.close();}<\/script>
+      </body></html>`);
+    w.document.close();
+  };
 
   const handleSend = (e: React.FormEvent) => {
     e.preventDefault();
@@ -346,6 +378,15 @@ export function SessionDetail() {
               <span className="text-[9px] text-white/40">{call.isVideoOff ? "Show" : "Camera"}</span>
             </div>
           )}
+          {call.callMode === "video" && call.callState === "connected" && (
+            <div className="flex flex-col items-center gap-1">
+              <button onClick={call.toggleScreenShare}
+                className={`w-[52px] h-[52px] rounded-full flex items-center justify-center transition-colors ${call.isScreenSharing ? "bg-primary text-white" : "bg-white/15 text-white hover:bg-white/25"}`}>
+                {call.isScreenSharing ? <MonitorOff className="w-5 h-5" /> : <Monitor className="w-5 h-5" />}
+              </button>
+              <span className="text-[9px] text-white/40">{call.isScreenSharing ? "Stop" : "Share"}</span>
+            </div>
+          )}
           <div className="flex flex-col items-center gap-1">
             <button onClick={call.endCall}
               className="w-[64px] h-[64px] rounded-full bg-red-600 hover:bg-red-500 text-white flex items-center justify-center shadow-xl shadow-red-900/40 transition-transform active:scale-95">
@@ -445,21 +486,27 @@ export function SessionDetail() {
               <div className="bg-muted/30 p-3 rounded-lg">
                 <div className="flex items-center justify-between mb-1">
                   <p className="text-[10px] text-muted-foreground font-semibold uppercase">Notes</p>
-                  {!editingNotes ? (
-                    <button onClick={() => { setNotesValue(session.notes || ""); setEditingNotes(true); }}
+                  <div className="flex items-center gap-1.5">
+                    <button onClick={exportNotesPDF} title="Export as PDF"
                       className="text-muted-foreground hover:text-foreground transition-colors">
-                      <Edit3 className="w-3 h-3" />
+                      <FileDown className="w-3 h-3" />
                     </button>
-                  ) : (
-                    <div className="flex gap-1">
-                      <button onClick={() => updateNotes.mutate(notesValue)} className="text-primary hover:text-primary/80" disabled={updateNotes.isPending}>
-                        {updateNotes.isPending ? <Loader2 className="w-3 h-3 animate-spin" /> : <Save className="w-3 h-3" />}
+                    {!editingNotes ? (
+                      <button onClick={() => { setNotesValue(session.notes || ""); setEditingNotes(true); }}
+                        className="text-muted-foreground hover:text-foreground transition-colors">
+                        <Edit3 className="w-3 h-3" />
                       </button>
-                      <button onClick={() => setEditingNotes(false)} className="text-muted-foreground hover:text-foreground">
-                        <X className="w-3 h-3" />
-                      </button>
-                    </div>
-                  )}
+                    ) : (
+                      <div className="flex gap-1">
+                        <button onClick={() => updateNotes.mutate(notesValue)} className="text-primary hover:text-primary/80" disabled={updateNotes.isPending}>
+                          {updateNotes.isPending ? <Loader2 className="w-3 h-3 animate-spin" /> : <Save className="w-3 h-3" />}
+                        </button>
+                        <button onClick={() => setEditingNotes(false)} className="text-muted-foreground hover:text-foreground">
+                          <X className="w-3 h-3" />
+                        </button>
+                      </div>
+                    )}
+                  </div>
                 </div>
                 {editingNotes ? (
                   <Textarea className="text-xs resize-none min-h-[72px] rounded-md border-border/50 bg-background"
@@ -639,6 +686,25 @@ export function SessionDetail() {
               );
             })}
           </div>
+          {/* Typing indicator */}
+          {partnerTyping && (
+            <div className="px-4 py-1.5 bg-card border-t border-border/30 flex items-center gap-1.5">
+              <div className="flex gap-0.5 items-end">
+                {[0, 1, 2].map(i => (
+                  <span key={i} className="w-1.5 h-1.5 rounded-full bg-muted-foreground/40 animate-bounce" style={{ animationDelay: `${i * 0.15}s` }} />
+                ))}
+              </div>
+              <span className="text-[11px] text-muted-foreground">{otherPerson?.firstName} is typing...</span>
+            </div>
+          )}
+          {/* Read receipt */}
+          {partnerRead && messages.length > 0 && (
+            <div className="px-4 pb-1 flex justify-end">
+              <span className="text-[10px] text-muted-foreground flex items-center gap-0.5">
+                <CheckCheck className="w-3 h-3 text-primary" /> Seen
+              </span>
+            </div>
+          )}
           <div className="p-3 bg-card border-t border-border/50 shrink-0">
             <form onSubmit={handleSend} className="flex items-center gap-2">
               {/* File attach */}
@@ -651,7 +717,7 @@ export function SessionDetail() {
                 {uploadingFile ? <Loader2 className="w-4 h-4 animate-spin" /> : <Paperclip className="w-4 h-4" />}
               </button>
               <Input placeholder="Type a message..." className="flex-1 rounded-lg h-10 bg-muted/20 border-border/50 text-sm px-3.5"
-                value={content} onChange={e => setContent(e.target.value)} />
+                value={content} onChange={e => { setContent(e.target.value); handleTyping(); }} />
               <Button
                 type="button"
                 size="icon"

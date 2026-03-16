@@ -63,6 +63,25 @@ export function setupWebSocket(server: Server) {
             .filter(c => c.sessionId === client!.sessionId && c.ws !== ws && c.ws.readyState === WebSocket.OPEN)
             .forEach(c => c.ws.send(payload));
         }
+
+        // Relay typing indicator to other session participant
+        if (msg.type === "typing" && client) {
+          const payload = JSON.stringify({
+            type: "typing",
+            userId: msg.userId,
+          });
+          clients
+            .filter(c => c.sessionId === client!.sessionId && c.ws !== ws && c.ws.readyState === WebSocket.OPEN)
+            .forEach(c => c.ws.send(payload));
+        }
+
+        // Relay read receipt
+        if (msg.type === "read" && client) {
+          const payload = JSON.stringify({ type: "read", userId: msg.userId });
+          clients
+            .filter(c => c.sessionId === client!.sessionId && c.ws !== ws && c.ws.readyState === WebSocket.OPEN)
+            .forEach(c => c.ws.send(payload));
+        }
       } catch (err) {
         console.error("WebSocket message error:", err);
       }

@@ -1,4 +1,4 @@
-import { ReactNode, useState, useEffect } from "react";
+import { ReactNode, useState, useEffect, useCallback } from "react";
 import { Link, useLocation } from "wouter";
 import { useAuth } from "@/hooks/use-auth";
 import { useI18n, languageNames, type Language } from "@/lib/i18n";
@@ -15,6 +15,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useIncomingCall } from "@/hooks/use-incoming-call";
 import { useGlobalRealtime } from "@/hooks/use-global-ws";
 import { useNotifications, type AppNotification } from "@/hooks/use-notifications";
+import { usePushNotifications } from "@/hooks/use-push-notifications";
 import { formatDistanceToNow } from "date-fns";
 
 type ThemeMode = "light" | "dark" | "system";
@@ -101,8 +102,16 @@ export function AppLayout({ children }: { children: ReactNode }) {
     } catch { return 0; }
   })();
 
-  const { incomingCall, answerCall, declineCall } = useIncomingCall(user?.id, addNotification);
-  useGlobalRealtime(user?.id, addNotification);
+  const { permission: pushPermission, requestPermission: requestPush, notify: pushNotify } = usePushNotifications();
+  const addNotificationWithPush = useCallback((notif: Omit<AppNotification, "id" | "timestamp" | "read">) => {
+    addNotification(notif);
+    if (pushPermission === "granted") {
+      pushNotify(notif.title, notif.body, notif.sessionId ? `/sessions/${notif.sessionId}` : undefined);
+    }
+  }, [addNotification, pushNotify, pushPermission]);
+
+  const { incomingCall, answerCall, declineCall } = useIncomingCall(user?.id, addNotificationWithPush);
+  useGlobalRealtime(user?.id, addNotificationWithPush);
 
   if (!user) return <>{children}</>;
   const initials = `${user.firstName?.[0] || ""}${user.lastName?.[0] || ""}`.toUpperCase() || user.email?.charAt(0).toUpperCase() || "?";
@@ -341,6 +350,25 @@ export function AppLayout({ children }: { children: ReactNode }) {
                               />
                             </div>
                           ))}
+                          {/* Push notifications permission */}
+                          <div className="flex items-center justify-between px-2 py-1.5 rounded-md hover:bg-muted/50">
+                            <div className="flex items-center gap-2">
+                              <Bell className="w-3 h-3 text-violet-500" />
+                              <span className="text-xs text-muted-foreground">Browser Push</span>
+                            </div>
+                            {pushPermission === "granted" ? (
+                              <span className="text-[10px] text-emerald-600 font-medium">Enabled</span>
+                            ) : pushPermission === "denied" ? (
+                              <span className="text-[10px] text-destructive font-medium">Blocked</span>
+                            ) : (
+                              <button
+                                onClick={requestPush}
+                                className="text-[10px] text-primary font-semibold hover:underline"
+                              >
+                                Enable
+                              </button>
+                            )}
+                          </div>
                         </div>
                       </motion.div>
                     )}
