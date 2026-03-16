@@ -72,7 +72,7 @@ function CreateRoomDialog({
       {
         name: form.name.trim(),
         description: form.description.trim() || undefined,
-        courseId: form.courseId ? Number(form.courseId) : null,
+        courseId: form.courseId && form.courseId !== "none" ? Number(form.courseId) : null,
         maxParticipants: Number(form.maxParticipants),
       },
       {
@@ -130,7 +130,7 @@ function CreateRoomDialog({
                 <SelectValue placeholder="No course" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="">No course</SelectItem>
+                <SelectItem value="none">No course</SelectItem>
                 {(courses as any[] | undefined)?.map((c: any) => (
                   <SelectItem key={c.id} value={String(c.id)}>
                     {c.code} — {c.name}

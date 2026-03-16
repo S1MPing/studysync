@@ -28,7 +28,26 @@ import { Rooms } from "@/pages/Rooms";
 import { I18nProvider } from "@/lib/i18n";
 import { useAuth } from "@/hooks/use-auth";
 import { Loader2 } from "lucide-react";
-import { useState, useEffect } from "react";
+import { useState, useEffect, Component, type ReactNode } from "react";
+
+class ErrorBoundary extends Component<{ children: ReactNode }, { error: Error | null }> {
+  state = { error: null };
+  static getDerivedStateFromError(error: Error) { return { error }; }
+  render() {
+    if (this.state.error) {
+      return (
+        <div className="min-h-screen flex items-center justify-center bg-background px-4">
+          <div className="max-w-sm w-full text-center space-y-4">
+            <p className="text-lg font-bold text-destructive">Something went wrong</p>
+            <p className="text-sm text-muted-foreground">{(this.state.error as Error).message}</p>
+            <button onClick={() => window.location.reload()} className="text-sm underline text-primary">Reload page</button>
+          </div>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
 
 function BannedScreen({ bannedUntil, banReason }: { bannedUntil?: string | null; banReason?: string | null }) {
   const [timeLeft, setTimeLeft] = useState<string | null>(null);
@@ -268,14 +287,16 @@ function Router() {
 
 function App() {
   return (
-    <QueryClientProvider client={queryClient}>
-      <I18nProvider>
-        <TooltipProvider>
-          <Toaster />
-          <Router />
-        </TooltipProvider>
-      </I18nProvider>
-    </QueryClientProvider>
+    <ErrorBoundary>
+      <QueryClientProvider client={queryClient}>
+        <I18nProvider>
+          <TooltipProvider>
+            <Toaster />
+            <Router />
+          </TooltipProvider>
+        </I18nProvider>
+      </QueryClientProvider>
+    </ErrorBoundary>
   );
 }
 
