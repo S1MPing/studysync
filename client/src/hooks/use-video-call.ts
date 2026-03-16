@@ -75,6 +75,7 @@ export function useVideoCall(sessionId: number) {
   const [isVideoOff, setIsVideoOff] = useState(false);
   const [isScreenSharing, setIsScreenSharing] = useState(false);
   const [minimized, setMinimized] = useState(false);
+  const [isSpeakerMuted, setIsSpeakerMuted] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const screenStreamRef = useRef<MediaStream | null>(null);
@@ -248,6 +249,12 @@ export function useVideoCall(sessionId: number) {
         });
         unsubsRef.current.push(unsub);
 
+        // Answerer also listens for ended signal from caller
+        const unsubEnded = onSnapshot(callDoc, (snap) => {
+          if (snap.data()?.ended) endCallInternal();
+        });
+        unsubsRef.current.push(unsubEnded);
+
         setCallState("connected");
         onCallConnected();
 
@@ -334,12 +341,12 @@ export function useVideoCall(sessionId: number) {
   }, [roomId, cleanup, endCallInternal, onCallConnected]);
 
   const endCall = useCallback(async () => {
+    endCallInternal(); // respond immediately, don't wait for Firebase
+
     try {
       const callDoc = doc(firestore, "calls", roomId);
-      await updateDoc(callDoc, { ended: true }).catch(() => {});
+      updateDoc(callDoc, { ended: true }).catch(() => {});
     } catch {}
-
-    endCallInternal();
 
     setTimeout(async () => {
       try {
@@ -412,13 +419,22 @@ export function useVideoCall(sessionId: number) {
     }
   }, [isScreenSharing]);
 
+  const toggleSpeaker = useCallback(() => {
+    setIsSpeakerMuted(prev => {
+      const newMuted = !prev;
+      if (remoteAudioRef.current) remoteAudioRef.current.muted = newMuted;
+      if (remoteVideoRef.current) remoteVideoRef.current.muted = newMuted;
+      return newMuted;
+    });
+  }, []);
+
   useEffect(() => { return () => cleanup(); }, [cleanup]);
 
   return {
     callState, callPhase, callDuration, callMode,
-    isMuted, isVideoOff, isScreenSharing, minimized, error,
+    isMuted, isVideoOff, isScreenSharing, isSpeakerMuted, minimized, error,
     localVideoRef, remoteVideoRef, remoteAudioRef,
-    startCall, endCall, toggleMute, toggleVideo, toggleScreenShare,
+    startCall, endCall, toggleMute, toggleVideo, toggleScreenShare, toggleSpeaker,
     setMinimized,
     formatDuration,
   };

@@ -96,6 +96,14 @@ export function setupWebSocket(server: Server) {
             .forEach(c => c.ws.send(payload));
         }
 
+        // Relay whiteboard draw event to other session participant
+        if (msg.type === "whiteboard-draw" && client) {
+          const payload = JSON.stringify({ type: "whiteboard-draw", data: msg.data });
+          clients
+            .filter(c => c.sessionId === client!.sessionId && c.ws !== ws && c.ws.readyState === WebSocket.OPEN)
+            .forEach(c => c.ws.send(payload));
+        }
+
         // ── Room WebRTC signaling ──────────────────────────────────────────────
 
         // Join a study room call

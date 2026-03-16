@@ -12,7 +12,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useToast } from "@/hooks/use-toast";
 import {
   Send, Loader2, ArrowLeft, Video, VideoOff, Phone,
-  Mic, MicOff, PhoneOff, CalendarPlus, Minimize2, Maximize2, X, Check, Paperclip, Edit3, Save, Lock, Signal, PhoneCall, Monitor, MonitorOff, FileDown, CheckCheck, Pencil
+  Mic, MicOff, PhoneOff, CalendarPlus, Minimize2, Maximize2, X, Check, Paperclip, Edit3, Save, Lock, Signal, PhoneCall, Monitor, MonitorOff, FileDown, CheckCheck, Pencil, Volume2, VolumeX
 } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { format } from "date-fns";
@@ -67,13 +67,46 @@ function renderMessageContent(text: string): React.ReactNode {
   });
 }
 
-function Whiteboard() {
+function Whiteboard({ sessionId, userId }: { sessionId: number; userId: string }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const wsRef = useRef<WebSocket | null>(null);
   const [isDrawing, setIsDrawing] = useState(false);
   const [color, setColor] = useState("#1e1e1e");
   const [lineSize, setLineSize] = useState(3);
   const [isEraser, setIsEraser] = useState(false);
   const lastPos = useRef<{ x: number; y: number } | null>(null);
+
+  const drawRemoteLine = (from: { x: number; y: number }, to: { x: number; y: number }, col: string, size: number, eraser: boolean) => {
+    const canvas = canvasRef.current;
+    const ctx = canvas?.getContext("2d");
+    if (!canvas || !ctx) return;
+    ctx.beginPath();
+    ctx.strokeStyle = eraser ? "#ffffff" : col;
+    ctx.lineWidth = eraser ? size * 3 : size;
+    ctx.lineCap = "round";
+    ctx.lineJoin = "round";
+    ctx.moveTo(from.x * canvas.width, from.y * canvas.height);
+    ctx.lineTo(to.x * canvas.width, to.y * canvas.height);
+    ctx.stroke();
+  };
+
+  useEffect(() => {
+    if (!sessionId || !userId) return;
+    const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
+    const ws = new WebSocket(`${proto}//${window.location.host}/ws`);
+    wsRef.current = ws;
+    ws.onopen = () => ws.send(JSON.stringify({ type: "join", userId, sessionId }));
+    ws.onmessage = (event) => {
+      try {
+        const msg = JSON.parse(event.data);
+        if (msg.type === "whiteboard-draw" && msg.data) {
+          drawRemoteLine(msg.data.from, msg.data.to, msg.data.color, msg.data.size, msg.data.eraser);
+        }
+      } catch {}
+    };
+    return () => { ws.close(); wsRef.current = null; };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sessionId, userId]);
 
   const getPos = (canvas: HTMLCanvasElement, e: { clientX: number; clientY: number }) => {
     const rect = canvas.getBoundingClientRect();
@@ -106,6 +139,17 @@ function Whiteboard() {
     ctx.lineCap = "round";
     ctx.lineJoin = "round";
     ctx.stroke();
+    // Broadcast to partner (normalized coordinates)
+    if (wsRef.current?.readyState === WebSocket.OPEN) {
+      wsRef.current.send(JSON.stringify({
+        type: "whiteboard-draw",
+        data: {
+          from: { x: lastPos.current.x / canvas.width, y: lastPos.current.y / canvas.height },
+          to: { x: pos.x / canvas.width, y: pos.y / canvas.height },
+          color, size: lineSize, eraser: isEraser,
+        },
+      }));
+    }
     lastPos.current = pos;
   };
 
@@ -207,7 +251,7 @@ export function SessionDetail() {
     const answerMode = params.get("answer") as CallMode | null;
     if (answerMode === "video" || answerMode === "audio") {
       window.history.replaceState({}, "", `/sessions/${sessionId}`);
-      setTimeout(() => startCallRef.current(answerMode), 600);
+      setTimeout(() => startCallRef.current(answerMode), 150);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sessionId]);
@@ -267,6 +311,7 @@ export function SessionDetail() {
 
   const s = session as any;
   const isTutor = s.tutorId === user?.id;
+  const isVerified = !!(user as any)?.isVerified;
   const otherPerson = isTutor ? s.student : s.tutor;
   const isInCall = call.callState !== "idle" && call.callState !== "ended";
   const myName = [user?.firstName, user?.lastName].filter(Boolean).join(" ") || "Unknown";
@@ -356,7 +401,12 @@ export function SessionDetail() {
           if (event.data.size > 0) chunksRef.current.push(event.data);
         };
         mediaRecorder.onstop = async () => {
-          const blob = new Blob(chunksRef.current, { type: "audio/webm" });
+          const mimeType = MediaRecorder.isTypeSupported("audio/webm;codecs=opus")
+            ? "audio/webm;codecs=opus"
+            : MediaRecorder.isTypeSupported("audio/mp4")
+            ? "audio/mp4"
+            : "audio/webm";
+          const blob = new Blob(chunksRef.current, { type: mimeType });
           const reader = new FileReader();
           reader.onloadend = () => {
             const base64 = reader.result as string;
@@ -468,13 +518,6 @@ export function SessionDetail() {
                   </div>
                 )}
 
-                {/* E2E encrypted banner */}
-                {isConnected && call.callPhase === "e2e" && (
-                  <div className="absolute top-4 left-1/2 -translate-x-1/2 bg-black/60 backdrop-blur-sm border border-green-500/30 rounded-full px-4 py-1.5 flex items-center gap-2 z-20">
-                    <Lock className="w-3.5 h-3.5 text-green-400" />
-                    <span className="text-xs font-semibold text-green-400">End-to-end encrypted</span>
-                  </div>
-                )}
               </div>
 
               {/* Local PiP */}
@@ -513,13 +556,6 @@ export function SessionDetail() {
                 </p>
               </div>
 
-              {/* E2E banner for audio */}
-              {isConnected && call.callPhase === "e2e" && (
-                <div className="mt-4 bg-green-500/10 border border-green-500/20 rounded-full px-4 py-1.5 flex items-center gap-2">
-                  <Lock className="w-3 h-3 text-green-400" />
-                  <span className="text-xs font-semibold text-green-400">End-to-end encrypted</span>
-                </div>
-              )}
 
               <video ref={call.remoteVideoRef} autoPlay playsInline className="hidden" />
               <audio ref={call.remoteAudioRef} autoPlay playsInline className="hidden" />
@@ -529,13 +565,20 @@ export function SessionDetail() {
         </div>
 
         {/* Controls */}
-        <div className="flex items-center justify-center gap-5 py-6 bg-zinc-950 shrink-0">
+        <div className="flex items-center justify-center gap-4 py-6 bg-zinc-950 shrink-0 flex-wrap px-4">
           <div className="flex flex-col items-center gap-1">
             <button onClick={call.toggleMute}
-              className={`w-13 h-13 w-[52px] h-[52px] rounded-full flex items-center justify-center transition-colors ${call.isMuted ? "bg-red-500/90 text-white" : "bg-white/15 text-white hover:bg-white/25"}`}>
+              className={`w-[52px] h-[52px] rounded-full flex items-center justify-center transition-colors ${call.isMuted ? "bg-red-500/90 text-white" : "bg-white/15 text-white hover:bg-white/25"}`}>
               {call.isMuted ? <MicOff className="w-5 h-5" /> : <Mic className="w-5 h-5" />}
             </button>
             <span className="text-[9px] text-white/40">{call.isMuted ? "Unmute" : "Mute"}</span>
+          </div>
+          <div className="flex flex-col items-center gap-1">
+            <button onClick={call.toggleSpeaker}
+              className={`w-[52px] h-[52px] rounded-full flex items-center justify-center transition-colors ${call.isSpeakerMuted ? "bg-red-500/90 text-white" : "bg-white/15 text-white hover:bg-white/25"}`}>
+              {call.isSpeakerMuted ? <VolumeX className="w-5 h-5" /> : <Volume2 className="w-5 h-5" />}
+            </button>
+            <span className="text-[9px] text-white/40">{call.isSpeakerMuted ? "Unmute" : "Speaker"}</span>
           </div>
           {call.callMode === "video" && (
             <div className="flex flex-col items-center gap-1">
@@ -546,7 +589,7 @@ export function SessionDetail() {
               <span className="text-[9px] text-white/40">{call.isVideoOff ? "Show" : "Camera"}</span>
             </div>
           )}
-          {call.callMode === "video" && call.callState === "connected" && (
+          {call.callMode === "video" && call.callState === "connected" && typeof (navigator.mediaDevices as any)?.getDisplayMedia === "function" && (
             <div className="flex flex-col items-center gap-1">
               <button onClick={call.toggleScreenShare}
                 className={`w-[52px] h-[52px] rounded-full flex items-center justify-center transition-colors ${call.isScreenSharing ? "bg-primary text-white" : "bg-white/15 text-white hover:bg-white/25"}`}>
@@ -694,7 +737,8 @@ export function SessionDetail() {
                   <Button
                     size="sm"
                     className="flex-1 rounded-md text-xs h-8"
-                    disabled={updateStatus.isPending}
+                    disabled={updateStatus.isPending || !isVerified}
+                    title={!isVerified ? "Account verification required (24–48 hrs)" : undefined}
                     onClick={() => updateStatus.mutate({ id: sessionId, status: "accepted" })}
                   >
                     <Check className="w-3.5 h-3.5 mr-1" /> Accept
@@ -771,10 +815,10 @@ export function SessionDetail() {
               </div>
             )}
             <div className="mt-4 pt-4 border-t border-border/50 space-y-2">
-              <Button onClick={() => handleStartCall("video")} className="w-full rounded-lg gap-2 text-xs h-9" size="sm" disabled={isInCall}>
+              <Button onClick={() => handleStartCall("video")} className="w-full rounded-lg gap-2 text-xs h-9" size="sm" disabled={isInCall || !isVerified} title={!isVerified ? "Verification required" : undefined}>
                 <Video className="w-3.5 h-3.5" /> Video Call
               </Button>
-              <Button onClick={() => handleStartCall("audio")} variant="outline" className="w-full rounded-lg gap-2 text-xs h-9" size="sm" disabled={isInCall}>
+              <Button onClick={() => handleStartCall("audio")} variant="outline" className="w-full rounded-lg gap-2 text-xs h-9" size="sm" disabled={isInCall || !isVerified} title={!isVerified ? "Verification required" : undefined}>
                 <Phone className="w-3.5 h-3.5" /> Audio Call
               </Button>
             </div>
@@ -792,10 +836,10 @@ export function SessionDetail() {
             <span className="text-xs font-semibold">{otherPerson?.firstName}</span>
           </div>
           <div className="flex gap-1.5">
-            <button onClick={() => handleStartCall("audio")} disabled={isInCall} className="w-7 h-7 rounded-md bg-muted flex items-center justify-center disabled:opacity-40">
+            <button onClick={() => handleStartCall("audio")} disabled={isInCall || !isVerified} className="w-7 h-7 rounded-md bg-muted flex items-center justify-center disabled:opacity-40">
               <Phone className="w-3.5 h-3.5 text-primary" />
             </button>
-            <button onClick={() => handleStartCall("video")} disabled={isInCall} className="w-7 h-7 rounded-md bg-primary flex items-center justify-center disabled:opacity-40">
+            <button onClick={() => handleStartCall("video")} disabled={isInCall || !isVerified} className="w-7 h-7 rounded-md bg-primary flex items-center justify-center disabled:opacity-40">
               <Video className="w-3.5 h-3.5 text-white" />
             </button>
           </div>
@@ -832,8 +876,8 @@ export function SessionDetail() {
                       )}
                       <div className={`rounded-xl px-3.5 py-2 relative ${isMe ? 'bg-primary text-white rounded-br-sm' : 'bg-card border border-border/50 rounded-bl-sm'}`}>
                         {msg.type === "voice" && msg.fileUrl ? (
-                          <audio controls className="w-40">
-                            <source src={msg.fileUrl} />
+                          <audio controls className="w-40 max-w-full" controlsList="nodownload" preload="metadata">
+                            <source src={msg.fileUrl} type={msg.fileUrl.startsWith("data:audio/mp4") ? "audio/mp4" : "audio/webm"} />
                           </audio>
                         ) : msg.type === "image" && msg.fileUrl ? (
                           <img src={msg.fileUrl} alt="Attachment" className="max-h-48 rounded-md" />
@@ -914,7 +958,7 @@ export function SessionDetail() {
           </TabsContent>
 
           <TabsContent value="whiteboard" className="flex-1 flex flex-col overflow-hidden min-h-[400px] m-0 bg-card border-x border-b border-border/60 rounded-b-xl shadow-soft p-3">
-            <Whiteboard />
+            <Whiteboard sessionId={sessionId} userId={String(user?.id || "")} />
           </TabsContent>
         </Tabs>
       </div>

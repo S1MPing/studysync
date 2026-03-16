@@ -49,7 +49,11 @@ export function useRealtimeMessages(sessionId: number, userId: string) {
         if (msg.type === "chat") {
           queryClient.setQueryData(
             [api.messages.list.path, sessionId],
-            (old: any[] | undefined) => old ? [...old, msg.data] : [msg.data]
+            (old: any[] | undefined) => {
+              if (!old) return [msg.data];
+              if (old.some((m: any) => m.id === msg.data?.id)) return old;
+              return [...old, msg.data];
+            }
           );
         } else if (msg.type === "typing") {
           setTypingRef.current(true);
