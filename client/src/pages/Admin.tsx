@@ -759,7 +759,7 @@ function ReportsTab() {
   const { toast } = useToast();
   const [statusFilter, setStatusFilter] = useState("pending");
 
-  const { data: reportsData, isLoading } = useQuery({
+  const { data: reportsData, isLoading, error: reportsError } = useQuery({
     queryKey: ["/api/admin/reports", statusFilter],
     queryFn: () => adminFetch(`/api/admin/reports?status=${statusFilter}`),
   });
@@ -786,7 +786,9 @@ function ReportsTab() {
         ))}
       </div>
       <div className="space-y-3">
-        {isLoading ? <LoadingSpinner /> : reportsData?.length === 0 ? (
+        {isLoading ? <LoadingSpinner /> : reportsError ? (
+          <div className="text-center py-12 text-red-400 text-xs bg-[#16213e] rounded-xl border border-white/5">{(reportsError as Error).message || "Failed to load reports"}</div>
+        ) : !reportsData?.length ? (
           <div className="text-center py-12 text-gray-500 text-xs bg-[#16213e] rounded-xl border border-white/5">No reports found</div>
         ) : reportsData?.map((r: any) => (
           <div key={r.id} className="bg-[#16213e] rounded-xl p-4 border border-white/5">
@@ -827,7 +829,7 @@ function ReportsTab() {
 // ── Audit Logs Tab ────────────────────────────────────────────────
 function AuditTab() {
   const [page, setPage] = useState(1);
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, error } = useQuery({
     queryKey: ["/api/admin/audit-logs", page],
     queryFn: () => adminFetch(`/api/admin/audit-logs?page=${page}&limit=50`),
     refetchInterval: 15000,
@@ -862,7 +864,9 @@ function AuditTab() {
           <tbody className="divide-y divide-white/5">
             {isLoading ? (
               <tr><td colSpan={5} className="text-center py-8"><Loader2 className="w-5 h-5 animate-spin text-gray-500 mx-auto" /></td></tr>
-            ) : data?.logs?.length === 0 ? (
+            ) : error ? (
+              <tr><td colSpan={5} className="text-center py-8 text-red-400 text-xs">{(error as Error).message || "Failed to load audit logs"}</td></tr>
+            ) : !data?.logs?.length ? (
               <tr><td colSpan={5} className="text-center py-8 text-gray-500">No logs yet</td></tr>
             ) : data?.logs?.map((log: any) => (
               <tr key={log.id} className="hover:bg-white/[0.02]">

@@ -150,6 +150,24 @@ export async function registerRoutes(
     }
   });
 
+  // POST /api/courses/find-or-create — authenticated users can find or create a course
+  app.post("/api/courses/find-or-create", isAuthenticated, async (req: any, res) => {
+    try {
+      const { code, name, university } = req.body;
+      if (!code || !name) return res.status(400).json({ message: "code and name are required" });
+      const codeUpper = code.trim().toUpperCase();
+      const uni = (university || "").trim();
+      // Try to find existing course by code
+      const existing = await db.select().from(courses).where(eq(courses.code, codeUpper));
+      if (existing.length > 0) return res.json(existing[0]);
+      // Create new
+      const [course] = await db.insert(courses).values({ code: codeUpper, name: name.trim(), university: uni }).returning();
+      res.json(course);
+    } catch (err) {
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
   // Tutor Courses
   app.get(api.tutorCourses.list.path, async (req, res) => {
     try {
@@ -242,11 +260,13 @@ export async function registerRoutes(
   app.post(api.sessions.create.path, isAuthenticated, async (req: any, res) => {
     try {
       const { recurringWeeks, ...rawInput } = req.body;
-      const input = api.sessions.create.input.parse(rawInput);
+      const input = api.sessions.create.input.parse({
+        ...rawInput,
+        studentId: rawInput.studentId || req.userId,
+      });
 
       const sessionData = {
         ...input,
-        studentId: input.studentId || req.userId,
         tutorId: input.tutorId || req.userId,
       };
 
@@ -264,9 +284,9 @@ export async function registerRoutes(
 
       // Notify tutor via WebSocket + email about new session request
       try {
-        const student = await storage.getUser(sessionData.studentId);
+        const student = await storage.getUser(sessionData.studentId!);
         const studentName = student ? `${student.firstName || ""} ${student.lastName || ""}`.trim() : "A student";
-        broadcastToUser(sessionData.tutorId, {
+        broadcastToUser(sessionData.tutorId!, {
           type: "session-request",
           sessionId: session.id,
           studentName,
@@ -275,8 +295,8 @@ export async function registerRoutes(
 
       // Email the tutor about the new request
       try {
-        const tutor = await storage.getUser(sessionData.tutorId);
-        const student = await storage.getUser(sessionData.studentId);
+        const tutor = await storage.getUser(sessionData.tutorId!);
+        const student = await storage.getUser(sessionData.studentId!);
         const course = (await db.select().from(courses).where(eq(courses.id, sessionData.courseId!)))[0];
         if (tutor?.email && student && course) {
           notifySessionRequest(tutor.email, tutor.firstName || "Tutor", `${student.firstName} ${student.lastName}`, course.code).catch(() => {});
@@ -723,10 +743,36 @@ export async function registerRoutes(
 
   // ---- STUDY ROOMS ROUTES ----
 
-  // GET /api/rooms - list active rooms
+  // GET /api/rooms - list all rooms with host and course
   app.get("/api/rooms", async (req, res) => {
     try {
-      const rooms = await db.select().from(studyRooms).where(eq(studyRooms.isActive, true)).orderBy(desc(studyRooms.createdAt));
+      const results = await db.execute(sql`
+        SELECT
+          r.*,
+          r.is_active AS "isOpen",
+          json_build_object('id', u.id, 'firstName', u.first_name, 'lastName', u.last_name) AS host,
+          CASE WHEN r.course_id IS NOT NULL THEN
+            json_build_object('id', c.id, 'code', c.code, 'name', c.name)
+          ELSE NULL END AS course
+        FROM study_rooms r
+        INNER JOIN users u ON r.host_id = u.id
+        LEFT JOIN courses c ON r.course_id = c.id
+        ORDER BY r.created_at DESC
+      `);
+      const rooms = results.rows.map((r: any) => ({
+        id: r.id,
+        name: r.name,
+        description: r.description,
+        courseId: r.course_id,
+        hostId: r.host_id,
+        jitsiRoomId: r.jitsi_room_id,
+        maxParticipants: r.max_participants,
+        isActive: r.is_active,
+        isOpen: r.is_active,
+        createdAt: r.created_at,
+        host: r.host,
+        course: r.course,
+      }));
       res.json(rooms);
     } catch (err) {
       res.status(500).json({ message: "Internal server error" });
@@ -742,8 +788,9 @@ export async function registerRoutes(
         ...input,
         hostId: req.userId,
         jitsiRoomId,
-      }).returning();
-      res.status(201).json(room);
+      } as any).returning();
+      // Return with isOpen alias
+      res.status(201).json({ ...room, isOpen: room.isActive });
     } catch (err) {
       if (err instanceof z.ZodError) {
         return res.status(400).json({ message: err.errors[0].message });

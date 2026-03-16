@@ -126,8 +126,7 @@ function TutorCard({ tutor, filterAvailableToday }: { tutor: any; filterAvailabl
     return currentHour >= startH && currentHour < endH;
   });
 
-  // If filter is active, hide tutors without today's availability
-  if (filterAvailableToday && !isAvailableToday) return null;
+  // All hooks must be called before any conditional return
   const { toast } = useToast();
   const [reportOpen, setReportOpen] = useState(false);
   const [reportReason, setReportReason] = useState("harassment");
@@ -159,6 +158,9 @@ function TutorCard({ tutor, filterAvailableToday }: { tutor: any; filterAvailabl
     },
     onError: () => toast({ title: "Failed to submit report", variant: "destructive" }),
   });
+
+  // Filter after all hooks
+  if (filterAvailableToday && !isAvailableToday) return null;
 
   return (
     <Card className="rounded-xl shadow-soft hover:shadow-elevated transition-all border-border/60 overflow-hidden">

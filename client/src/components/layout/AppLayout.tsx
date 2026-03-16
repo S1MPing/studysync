@@ -252,23 +252,31 @@ export function AppLayout({ children }: { children: ReactNode }) {
       </AnimatePresence>
       {/* Sidebar */}
       <aside className="hidden md:flex flex-col w-56 shrink-0 border-r border-border/60 bg-card sticky top-0 h-screen">
-        <div className="px-4 py-4 border-b border-border/50 flex items-center justify-between">
-          <a href="/" onClick={(e) => { e.preventDefault(); window.location.href = "/"; }} className="flex items-center gap-2 hover:opacity-80 transition-opacity cursor-pointer">
-            <img src="/favicon-96x96.png" alt="StudySync" className="w-7 h-7" />
-            <span className="text-base font-bold tracking-tight">StudySync</span>
-          </a>
-          <div className="flex items-center gap-1">
-            <button onClick={() => setSearchOpen(true)} className="w-8 h-8 rounded-lg flex items-center justify-center hover:bg-muted/60 transition-colors text-muted-foreground" title="Search (Ctrl+K)">
-              <Search className="w-4 h-4" />
-            </button>
-            <button onClick={() => setNotifOpen(true)} className="relative w-7 h-7 rounded-md hover:bg-muted flex items-center justify-center text-muted-foreground" title="Notifications">
-              <Bell className="w-4 h-4" />
-              {notifCount > 0 && <span className="absolute -top-0.5 -right-0.5 w-3.5 h-3.5 bg-destructive text-white text-[8px] font-bold rounded-full flex items-center justify-center">{notifCount > 9 ? "9+" : notifCount}</span>}
-            </button>
-            <button onClick={() => setSettingsOpen(true)} className="w-7 h-7 rounded-md hover:bg-muted flex items-center justify-center text-muted-foreground" title="Menu">
-              <Menu className="w-4 h-4" />
-            </button>
+        <div className="px-4 py-3 border-b border-border/50">
+          <div className="flex items-center justify-between mb-3">
+            <a href="/" onClick={(e) => { e.preventDefault(); window.location.href = "/"; }} className="flex items-center gap-2 hover:opacity-80 transition-opacity cursor-pointer">
+              <img src="/favicon-96x96.png" alt="StudySync" className="w-7 h-7" />
+              <span className="text-base font-bold tracking-tight">StudySync</span>
+            </a>
+            <div className="flex items-center gap-1">
+              <button onClick={() => setNotifOpen(true)} className="relative w-7 h-7 rounded-md hover:bg-muted flex items-center justify-center text-muted-foreground" title="Notifications">
+                <Bell className="w-4 h-4" />
+                {notifCount > 0 && <span className="absolute -top-0.5 -right-0.5 w-3.5 h-3.5 bg-destructive text-white text-[8px] font-bold rounded-full flex items-center justify-center">{notifCount > 9 ? "9+" : notifCount}</span>}
+              </button>
+              <button onClick={() => setSettingsOpen(true)} className="w-7 h-7 rounded-md hover:bg-muted flex items-center justify-center text-muted-foreground" title="Menu">
+                <Menu className="w-4 h-4" />
+              </button>
+            </div>
           </div>
+          <button
+            onClick={() => setSearchOpen(true)}
+            className="w-full flex items-center gap-2 px-3 py-1.5 rounded-lg bg-muted/50 hover:bg-muted text-muted-foreground text-xs transition-colors"
+            title="Search (Ctrl+K)"
+          >
+            <Search className="w-3.5 h-3.5 shrink-0" />
+            <span className="flex-1 text-left">Search…</span>
+            <kbd className="text-[9px] bg-background border border-border rounded px-1 py-0.5 font-mono">⌘K</kbd>
+          </button>
         </div>
         <nav className="flex-1 px-2.5 py-3 space-y-0.5">
           {navItems.map((item) => {
