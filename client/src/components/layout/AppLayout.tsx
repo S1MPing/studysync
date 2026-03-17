@@ -5,7 +5,7 @@ import { useAuth } from "@/hooks/use-auth";
 import { useI18n, languageNames, type Language } from "@/lib/i18n";
 import {
   LayoutDashboard, Search, Calendar,
-  LogOut, Loader2, Settings, Bell, Moon, Sun, Monitor,
+  LogOut, Loader2, Settings, Bell, BellOff, Moon, Sun, Monitor,
   HelpCircle, X, ChevronRight, ChevronDown, Globe, Info, User, Shield, Menu, FolderOpen, TrendingUp,
   Phone, PhoneOff, Video, MessageSquare, PhoneCall, CalendarCheck, Check, Trash2, Volume2, VolumeX,
   Brain, Users, Clock
@@ -130,7 +130,7 @@ export function AppLayout({ children }: { children: ReactNode }) {
     }
   }, [addNotification, pushNotify, pushPermission]);
 
-  const { incomingCall, answerCall, declineCall } = useIncomingCall(user?.id, addNotificationWithPush);
+  const { incomingCall, answerCall, declineCall, ringMuted, toggleRingMute } = useIncomingCall(user?.id, addNotificationWithPush);
   useGlobalRealtime(user?.id, addNotificationWithPush);
   useSessionReminders(sessions || [], addNotificationWithPush);
 
@@ -231,6 +231,13 @@ export function AppLayout({ children }: { children: ReactNode }) {
                 <p className="font-semibold text-sm truncate">{incomingCall.callerName}</p>
               </div>
               <div className="flex gap-2 shrink-0" onClick={(e) => e.stopPropagation()}>
+                <button
+                  onClick={() => toggleRingMute()}
+                  className={`w-9 h-9 rounded-full flex items-center justify-center transition-colors ${ringMuted ? "bg-zinc-600 hover:bg-zinc-500" : "bg-zinc-700 hover:bg-zinc-600"}`}
+                  title={ringMuted ? "Unmute ring" : "Mute ring"}
+                >
+                  {ringMuted ? <BellOff className="w-4 h-4 text-white" /> : <Bell className="w-4 h-4 text-white" />}
+                </button>
                 <button
                   onClick={() => declineCall()}
                   className="w-9 h-9 rounded-full bg-red-500 hover:bg-red-600 flex items-center justify-center transition-colors"

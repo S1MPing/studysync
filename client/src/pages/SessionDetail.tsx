@@ -12,7 +12,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useToast } from "@/hooks/use-toast";
 import {
   Send, Loader2, ArrowLeft, Video, VideoOff, Phone,
-  Mic, MicOff, PhoneOff, CalendarPlus, Minimize2, Maximize2, X, Check, Paperclip, Edit3, Save, Lock, Signal, PhoneCall, Monitor, MonitorOff, FileDown, CheckCheck, Pencil, Volume2, VolumeX, Bell, BellOff, Smile
+  Mic, MicOff, PhoneOff, CalendarPlus, Minimize2, Maximize2, X, Check, Paperclip, Edit3, Save, Lock, Signal, PhoneCall, Monitor, MonitorOff, FileDown, CheckCheck, Pencil, Volume2, VolumeX, Smile
 } from "lucide-react";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -368,7 +368,7 @@ export function SessionDetail() {
   };
 
   const sendGif = (gifUrl: string, close: () => void) => {
-    sendMessage.mutate({ sessionId, content: gifUrl, type: "image" }, {
+    sendMessage.mutate({ sessionId, fileUrl: gifUrl, content: "", type: "image" }, {
       onSuccess: (msg) => { broadcastMessage(msg); close(); }
     });
   };
@@ -378,7 +378,7 @@ export function SessionDetail() {
     gifTimerRef.current = setTimeout(async () => {
       setGifLoading(true);
       try {
-        const apiKey = import.meta.env.VITE_GIPHY_API_KEY || "";
+        const apiKey = import.meta.env.VITE_GIPHY_API_KEY || "dc6zaTOxFJmzC";
         const endpoint = type === "sticker" ? "stickers" : "gifs";
         const url = q.trim()
           ? `https://api.giphy.com/v1/${endpoint}/search?api_key=${apiKey}&q=${encodeURIComponent(q)}&limit=20&rating=pg`
@@ -618,15 +618,6 @@ export function SessionDetail() {
             </button>
             <span className="text-[9px] text-white/40">{call.isSpeakerLoud ? "Speaker" : "Earpiece"}</span>
           </div>
-          {isWaiting && (
-            <div className="flex flex-col items-center gap-1">
-              <button onClick={call.toggleRingMute}
-                className={`w-[52px] h-[52px] rounded-full flex items-center justify-center transition-colors ${call.ringMuted ? "bg-white/30 text-white" : "bg-white/15 text-white hover:bg-white/25"}`}>
-                {call.ringMuted ? <BellOff className="w-5 h-5" /> : <Bell className="w-5 h-5" />}
-              </button>
-              <span className="text-[9px] text-white/40">{call.ringMuted ? "Ring off" : "Ringing"}</span>
-            </div>
-          )}
           {call.callMode === "video" && (
             <div className="flex flex-col items-center gap-1">
               <button onClick={call.toggleVideo}
@@ -1033,7 +1024,7 @@ export function SessionDetail() {
                           </div>
                         ) : gifResults.length === 0 ? (
                           <div className="flex items-center justify-center h-32 text-xs text-muted-foreground text-center px-2">
-                            {import.meta.env.VITE_GIPHY_API_KEY ? "No results — try searching" : "Add VITE_GIPHY_API_KEY to enable GIFs"}
+                            No results — try a different search
                           </div>
                         ) : (
                           <div className="grid grid-cols-3 gap-1 max-h-48 overflow-y-auto">

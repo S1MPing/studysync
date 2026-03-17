@@ -10,11 +10,11 @@ export interface IncomingCall {
   mode: "video" | "audio";
 }
 
-function useRingTone(active: boolean) {
+function useRingTone(active: boolean, muted: boolean) {
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
-    if (!active) {
+    if (!active || muted) {
       if (timerRef.current) clearTimeout(timerRef.current);
       return;
     }
@@ -49,17 +49,18 @@ function useRingTone(active: boolean) {
       running = false;
       if (timerRef.current) { clearTimeout(timerRef.current); timerRef.current = null; }
     };
-  }, [active]);
+  }, [active, muted]);
 }
 
 type AddNotif = (n: Omit<AppNotification, "id" | "timestamp" | "read">) => void;
 
 export function useIncomingCall(userId: string | undefined, addNotification?: AddNotif) {
   const [incomingCall, setIncomingCall] = useState<IncomingCall | null>(null);
+  const [ringMuted, setRingMuted] = useState(false);
   const addNotifRef = useRef(addNotification);
   useEffect(() => { addNotifRef.current = addNotification; }, [addNotification]);
 
-  useRingTone(!!incomingCall);
+  useRingTone(!!incomingCall, ringMuted);
 
   useEffect(() => {
     if (!userId) return;
@@ -119,5 +120,7 @@ export function useIncomingCall(userId: string | undefined, addNotification?: Ad
     setIncomingCall(null);
   };
 
-  return { incomingCall, answerCall, declineCall };
+  const toggleRingMute = () => setRingMuted(m => !m);
+
+  return { incomingCall, answerCall, declineCall, ringMuted, toggleRingMute };
 }
