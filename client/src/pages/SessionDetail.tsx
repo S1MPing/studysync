@@ -12,8 +12,9 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useToast } from "@/hooks/use-toast";
 import {
   Send, Loader2, ArrowLeft, Video, VideoOff, Phone,
-  Mic, MicOff, PhoneOff, CalendarPlus, Minimize2, Maximize2, X, Check, Paperclip, Edit3, Save, Lock, Signal, PhoneCall, Monitor, MonitorOff, FileDown, CheckCheck, Pencil, Volume2, VolumeX
+  Mic, MicOff, PhoneOff, CalendarPlus, Minimize2, Maximize2, X, Check, Paperclip, Edit3, Save, Lock, Signal, PhoneCall, Monitor, MonitorOff, FileDown, CheckCheck, Pencil, Volume2, VolumeX, Bell, BellOff, Smile
 } from "lucide-react";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { format } from "date-fns";
 import katex from "katex";
@@ -271,6 +272,12 @@ export function SessionDetail() {
   const typingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const { toast } = useToast();
   const queryClient = useQueryClient();
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [emojiTab, setEmojiTab] = useState<"emoji" | "gif" | "sticker">("emoji");
+  const [gifQuery, setGifQuery] = useState("");
+  const [gifResults, setGifResults] = useState<Array<{ id: string; url: string; preview: string }>>([]);
+  const [gifLoading, setGifLoading] = useState(false);
+  const gifTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const updateNotes = useMutation({
     mutationFn: async (notes: string) => {
@@ -354,6 +361,37 @@ export function SessionDetail() {
     sendMessage.mutate({ sessionId, content, type: "text" }, {
       onSuccess: (msg) => { broadcastMessage(msg); setContent(""); }
     });
+  };
+
+  const insertEmoji = (emoji: string) => {
+    setContent(prev => prev + emoji);
+  };
+
+  const sendGif = (gifUrl: string, close: () => void) => {
+    sendMessage.mutate({ sessionId, content: gifUrl, type: "image" }, {
+      onSuccess: (msg) => { broadcastMessage(msg); close(); }
+    });
+  };
+
+  const searchGifs = (q: string, type: "gif" | "sticker") => {
+    if (gifTimerRef.current) clearTimeout(gifTimerRef.current);
+    gifTimerRef.current = setTimeout(async () => {
+      setGifLoading(true);
+      try {
+        const apiKey = import.meta.env.VITE_GIPHY_API_KEY || "";
+        const endpoint = type === "sticker" ? "stickers" : "gifs";
+        const url = q.trim()
+          ? `https://api.giphy.com/v1/${endpoint}/search?api_key=${apiKey}&q=${encodeURIComponent(q)}&limit=20&rating=pg`
+          : `https://api.giphy.com/v1/${endpoint}/trending?api_key=${apiKey}&limit=20&rating=pg`;
+        const res = await fetch(url);
+        const json = await res.json();
+        setGifResults((json.data || []).map((g: any) => ({
+          id: g.id,
+          url: g.images?.original?.url || g.images?.fixed_height?.url || "",
+          preview: g.images?.fixed_height_small?.url || g.images?.fixed_height?.url || "",
+        })));
+      } catch { setGifResults([]); } finally { setGifLoading(false); }
+    }, 400);
   };
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -574,12 +612,21 @@ export function SessionDetail() {
             <span className="text-[9px] text-white/40">{call.isMuted ? "Unmute" : "Mute"}</span>
           </div>
           <div className="flex flex-col items-center gap-1">
-            <button onClick={call.toggleSpeaker}
-              className={`w-[52px] h-[52px] rounded-full flex items-center justify-center transition-colors ${call.isSpeakerMuted ? "bg-red-500/90 text-white" : "bg-white/15 text-white hover:bg-white/25"}`}>
-              {call.isSpeakerMuted ? <VolumeX className="w-5 h-5" /> : <Volume2 className="w-5 h-5" />}
+            <button onClick={call.toggleSpeaker} title={call.isSpeakerLoud ? "Switch to earpiece" : "Switch to loudspeaker"}
+              className="w-[52px] h-[52px] rounded-full flex items-center justify-center transition-colors bg-white/15 text-white hover:bg-white/25">
+              {call.isSpeakerLoud ? <Volume2 className="w-5 h-5" /> : <VolumeX className="w-5 h-5 opacity-60" />}
             </button>
-            <span className="text-[9px] text-white/40">{call.isSpeakerMuted ? "Unmute" : "Speaker"}</span>
+            <span className="text-[9px] text-white/40">{call.isSpeakerLoud ? "Speaker" : "Earpiece"}</span>
           </div>
+          {isWaiting && (
+            <div className="flex flex-col items-center gap-1">
+              <button onClick={call.toggleRingMute}
+                className={`w-[52px] h-[52px] rounded-full flex items-center justify-center transition-colors ${call.ringMuted ? "bg-white/30 text-white" : "bg-white/15 text-white hover:bg-white/25"}`}>
+                {call.ringMuted ? <BellOff className="w-5 h-5" /> : <Bell className="w-5 h-5" />}
+              </button>
+              <span className="text-[9px] text-white/40">{call.ringMuted ? "Ring off" : "Ringing"}</span>
+            </div>
+          )}
           {call.callMode === "video" && (
             <div className="flex flex-col items-center gap-1">
               <button onClick={call.toggleVideo}
@@ -940,6 +987,69 @@ export function SessionDetail() {
                   className="w-10 h-10 rounded-lg shrink-0 bg-muted/40 hover:bg-muted flex items-center justify-center text-muted-foreground transition-colors">
                   {uploadingFile ? <Loader2 className="w-4 h-4 animate-spin" /> : <Paperclip className="w-4 h-4" />}
                 </button>
+                {/* Emoji / GIF / Sticker picker */}
+                <Popover open={pickerOpen} onOpenChange={(open) => {
+                  setPickerOpen(open);
+                  if (open && emojiTab !== "emoji") searchGifs(gifQuery, emojiTab as "gif" | "sticker");
+                }}>
+                  <PopoverTrigger asChild>
+                    <button type="button"
+                      className="w-10 h-10 rounded-lg shrink-0 bg-muted/40 hover:bg-muted flex items-center justify-center text-muted-foreground transition-colors">
+                      <Smile className="w-4 h-4" />
+                    </button>
+                  </PopoverTrigger>
+                  <PopoverContent side="top" align="start" className="w-72 p-2">
+                    {/* Tabs */}
+                    <div className="flex gap-1 mb-2">
+                      {(["emoji", "gif", "sticker"] as const).map(tab => (
+                        <button key={tab} type="button"
+                          onClick={() => { setEmojiTab(tab); if (tab !== "emoji") searchGifs(gifQuery, tab as "gif" | "sticker"); }}
+                          className={`flex-1 text-xs py-1 rounded-md font-medium transition-colors ${emojiTab === tab ? "bg-primary text-primary-foreground" : "bg-muted/50 text-muted-foreground hover:bg-muted"}`}>
+                          {tab === "emoji" ? "😀 Emoji" : tab === "gif" ? "GIF" : "Sticker"}
+                        </button>
+                      ))}
+                    </div>
+                    {emojiTab === "emoji" ? (
+                      <div className="grid grid-cols-8 gap-0.5 max-h-48 overflow-y-auto">
+                        {["😀","😁","😂","🤣","😃","😄","😅","😆","😉","😊","😋","😎","😍","🥰","😘","😗","🙃","🤩","😏","😒","😞","😔","😟","😕","🙁","😣","😖","😫","😩","🥺","😢","😭","😤","😠","😡","🤬","🤯","😳","🥵","🥶","😱","😨","😰","😥","😓","🤗","🤔","🤭","🤫","🤥","😶","😑","😬","🙄","😯","😦","😧","😮","😲","🥱","😴","🤤","😪","😵","🤐","🥴","🤢","🤮","🤧","😷","🤒","🤕","🤑","🤠","😈","👿","👹","👺","🤡","👻","💀","☠️","👽","👾","🤖","🎃","😺","😸","😹","😻","😼","😽","🙀","😿","😾","👋","🤚","🖐","✋","🖖","👌","🤌","🤏","✌️","🤞","🤟","🤘","🤙","👈","👉","👆","🖕","👇","☝️","👍","👎","✊","👊","🤛","🤜","👏","🙌","👐","🤲","🙏","✍️","💪","🦾","🦿","🦵","🦶","👂","🦻","👃","🧠","🦷","🦴","👀","👁","👅","👄","💋","💌","💘","💝","💖","💗","💓","💞","💕","💟","❣️","💔","❤️","🧡","💛","💚","💙","💜","🖤","🤍","🤎","💯","💢","💥","💫","💦","💨","🕳","💬","💭","💤","🌍","🌎","🌏","🌐","🏔","⛰","🌋","🗻","🏕","🏖","🏜","🏝","🏟","🏛","🏗","🏘","🏙","🏠","🏡","🏢","🏥","🏦","🏨","🏩","🏪","🏫","🏬","🏭","🏯","🏰","🗼","🗽","⛪","🕌","🛕","⛩","🕍","⛲","⛺","🌁","🌃","🌄","🌅","🌆","🌇","🌉","♨️","🌌","🌠","🎇","🎆","🎠","🎡","🎢","💈","🎪","🚂","🚃","🚄","🚅","🚆","🚇","🚈","🚉","🚊","🚝","🚞","🚋","🚌","🚍","🚎","🚐","🚑","🚒","🚓","🚔","🚕","🚖","🚗","🚘","🚙","🛻","🚚","🚛","🚜","🏎","🏍","🛵","🛺","🚲","🛴","🛹","🛼","🚏","⛽","🛞","🚨","🚥","🚦","🛑","🚧","⚓","🛟","⛵","🛶","🚤","🛳","⛴","🛥","🚢","✈️","🛩","🛫","🛬","🪂","💺","🚁","🚟","🚠","🚡","🛰","🚀","🛸","🪐","⭐","🌟","💫","✨","🎇","🎆","☄️","🌞","🌝","🌛","🌜","🌚","🌕","🌙","🌏","🌍","🌎","💧","🌊","🌬","🌀","🌈","🌂","☂️","☔","⛱","⚡","❄️","☃️","⛄","🔥","🎋","🎍","🍀","🌿","🌱","🌲","🌳","🌴","🪵","🌵","🎄","🌾","🌺","🌻","🌹","🥀","🌷","🌸","💐","🍄","🐚","🪸","🪨","🍎","🍐","🍊","🍋","🍌","🍉","🍇","🍓","🫐","🍈","🍒","🍑","🥭","🍍","🥥","🥝","🍅","🍆","🥑","🥦","🥬","🥒","🌶","🫑","🧄","🧅","🥔","🍠","🫘","🥜","🌰","🍞","🥐","🥖","🫓","🥨","🥯","🧀","🥚","🍳","🧈","🥞","🧇","🥓","🥩","🍗","🍖","🌭","🍔","🍟","🍕","🫔","🌮","🌯","🥙","🧆","🍿","🧂","🥫","🍱","🍘","🍣","🍤","🍙","🍚","🍛","🍜","🦪","🍝","🍢","🍡","🍧","🍨","🍦","🥧","🧁","🍰","🎂","🍮","🍭","🍬","🍫","🍩","🍪","🍯","🧃","🥤","🧋","☕","🫖","🍵","🧉","🍺","🍻","🥂","🍷","🫗","🥃","🍸","🍹","🧊","🥄","🍴","🍽","🥢","🎮","🎲","🎯","🎳","🎻","🎺","🎸","🥁","🎹","🎷","🎼","🎵","🎶","🎤","🎧","📻","🎙","🎚","🎛","📺","📷","📸","📹","🎥","📽","🎞","📞","☎️","📟","📠","📡","🔋","🪫","🔌","💡","🔦","🕯","🪔","🧯","🛢","💸","💵","💴","💶","💷","💰","💳","💎","⚖️","🧲","🔧","🪛","🔨","⚒","🛠","⛏","🔩","🪤","🧱","🪜","🪞","🪟","🛏","🛋","🚿","🛁","🪥","🧴","🧷","🧹","🧺","🧻","🧼","🫧","🪣","🧽","🪒","🏷","📦","📫","📪","📬","📭","📮","🗳","✏️","✒️","🖋","🖊","📝","📁","📂","🗂","📅","📆","📇","📈","📉","📊","📋","📌","📍","✂️","🗃","🗄","🗑","🔒","🔓","🔏","🔐","🔑","🗝","🔨","🪓","⛏","⚒","🛠","🗡","⚔️","🛡","🔫","🪃","🪚","🔧","🪛","🔩","⚙️","🗜","⚖️","🦯","🔗","⛓","🪝","🧲","🪜","⚗️","🔭","🔬","🩺","🩻","🩹","🩼","🩺","💊","💉","🩸","🧬","🔬","🏋️","⛷","🏂","🪂","🏌️","🏄","🚣","🧗","🚵","🚴","🏆","🥇","🥈","🥉","🏅","🎖","🏵","🎗","🎫","🎟","🎪","🤹","🎭","🩰","🎨","🖼","🎠","🎡","🎢","🎪","🎃","🎆","🎇","🎑","🎋","🎍","🎎","🎏","🎐","🧧","🎀","🎁","🎊","🎉","🎈","🎋","🎍"].map((emoji) => (
+                          <button key={emoji} type="button" onClick={() => insertEmoji(emoji)}
+                            className="text-xl w-8 h-8 flex items-center justify-center rounded hover:bg-muted transition-colors">
+                            {emoji}
+                          </button>
+                        ))}
+                      </div>
+                    ) : (
+                      <>
+                        <input
+                          type="text"
+                          placeholder={`Search ${emojiTab}s...`}
+                          value={gifQuery}
+                          onChange={e => { setGifQuery(e.target.value); searchGifs(e.target.value, emojiTab as "gif" | "sticker"); }}
+                          className="w-full text-xs rounded-md border border-border/50 bg-muted/30 px-2.5 py-1.5 mb-2 outline-none focus:border-primary"
+                        />
+                        {gifLoading ? (
+                          <div className="flex items-center justify-center h-32">
+                            <Loader2 className="w-5 h-5 animate-spin text-muted-foreground" />
+                          </div>
+                        ) : gifResults.length === 0 ? (
+                          <div className="flex items-center justify-center h-32 text-xs text-muted-foreground text-center px-2">
+                            {import.meta.env.VITE_GIPHY_API_KEY ? "No results — try searching" : "Add VITE_GIPHY_API_KEY to enable GIFs"}
+                          </div>
+                        ) : (
+                          <div className="grid grid-cols-3 gap-1 max-h-48 overflow-y-auto">
+                            {gifResults.map(g => (
+                              <button key={g.id} type="button"
+                                onClick={() => sendGif(g.url, () => { setPickerOpen(false); setGifQuery(""); setGifResults([]); })}
+                                className="rounded overflow-hidden hover:ring-2 hover:ring-primary transition-all">
+                                <img src={g.preview} alt="" className="w-full h-16 object-cover" loading="lazy" />
+                              </button>
+                            ))}
+                          </div>
+                        )}
+                      </>
+                    )}
+                  </PopoverContent>
+                </Popover>
                 <Input placeholder="Type a message... (use $...$ for math)" className="flex-1 rounded-lg h-10 bg-muted/20 border-border/50 text-sm px-3.5"
                   value={content} onChange={e => { setContent(e.target.value); handleTyping(); }} />
                 <Button

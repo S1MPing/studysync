@@ -24,11 +24,11 @@ function formatDuration(secs: number): string {
   return h > 0 ? `${h}:${m}:${s}` : `${m}:${s}`;
 }
 
-function useRingTone(active: boolean) {
+function useRingTone(active: boolean, muted: boolean) {
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
-    if (!active) {
+    if (!active || muted) {
       if (timerRef.current) clearTimeout(timerRef.current);
       return;
     }
@@ -75,13 +75,14 @@ export function useVideoCall(sessionId: number) {
   const [isVideoOff, setIsVideoOff] = useState(false);
   const [isScreenSharing, setIsScreenSharing] = useState(false);
   const [minimized, setMinimized] = useState(false);
-  const [isSpeakerMuted, setIsSpeakerMuted] = useState(false);
+  const [isSpeakerLoud, setIsSpeakerLoud] = useState(true);
+  const [ringMuted, setRingMuted] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const screenStreamRef = useRef<MediaStream | null>(null);
 
-  // Ring tone plays for caller while waiting
-  useRingTone(callState === "waiting");
+  // Ring tone plays for caller while waiting (unless muted)
+  useRingTone(callState === "waiting", ringMuted);
 
   const pcRef = useRef<RTCPeerConnection | null>(null);
   const localStreamRef = useRef<MediaStream | null>(null);
@@ -419,22 +420,25 @@ export function useVideoCall(sessionId: number) {
     }
   }, [isScreenSharing]);
 
+  // Toggle between loudspeaker (full volume) and earpiece (low volume)
   const toggleSpeaker = useCallback(() => {
-    setIsSpeakerMuted(prev => {
-      const newMuted = !prev;
-      if (remoteAudioRef.current) remoteAudioRef.current.muted = newMuted;
-      if (remoteVideoRef.current) remoteVideoRef.current.muted = newMuted;
-      return newMuted;
+    setIsSpeakerLoud(prev => {
+      const loud = !prev;
+      if (remoteAudioRef.current) remoteAudioRef.current.volume = loud ? 1.0 : 0.15;
+      if (remoteVideoRef.current) remoteVideoRef.current.volume = loud ? 1.0 : 0.15;
+      return loud;
     });
   }, []);
+
+  const toggleRingMute = useCallback(() => setRingMuted(m => !m), []);
 
   useEffect(() => { return () => cleanup(); }, [cleanup]);
 
   return {
     callState, callPhase, callDuration, callMode,
-    isMuted, isVideoOff, isScreenSharing, isSpeakerMuted, minimized, error,
+    isMuted, isVideoOff, isScreenSharing, isSpeakerLoud, ringMuted, minimized, error,
     localVideoRef, remoteVideoRef, remoteAudioRef,
-    startCall, endCall, toggleMute, toggleVideo, toggleScreenShare, toggleSpeaker,
+    startCall, endCall, toggleMute, toggleVideo, toggleScreenShare, toggleSpeaker, toggleRingMute,
     setMinimized,
     formatDuration,
   };
