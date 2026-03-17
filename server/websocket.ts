@@ -104,6 +104,13 @@ export function setupWebSocket(server: Server) {
             .forEach(c => c.ws.send(payload));
         }
 
+        if (msg.type === "whiteboard-clear" && client) {
+          const payload = JSON.stringify({ type: "whiteboard-clear" });
+          clients
+            .filter(c => c.sessionId === client!.sessionId && c.ws !== ws && c.ws.readyState === WebSocket.OPEN)
+            .forEach(c => c.ws.send(payload));
+        }
+
         // ── Room WebRTC signaling ──────────────────────────────────────────────
 
         // Join a study room call

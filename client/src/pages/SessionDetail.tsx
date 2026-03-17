@@ -73,22 +73,16 @@ function Whiteboard({ sessionId, userId }: { sessionId: number; userId: string }
   const wsRef = useRef<WebSocket | null>(null);
   const [isDrawing, setIsDrawing] = useState(false);
   const [color, setColor] = useState("#1e1e1e");
-  const [lineSize, setLineSize] = useState(3);
-  const [isEraser, setIsEraser] = useState(false);
+  const [lineSize, setLineSize] = useState(4);
+  const [tool, setTool] = useState<"pen" | "eraser">("pen");
   const lastPos = useRef<{ x: number; y: number } | null>(null);
 
-  const drawRemoteLine = (from: { x: number; y: number }, to: { x: number; y: number }, col: string, size: number, eraser: boolean) => {
-    const canvas = canvasRef.current;
-    const ctx = canvas?.getContext("2d");
-    if (!canvas || !ctx) return;
-    ctx.beginPath();
-    ctx.strokeStyle = eraser ? "#ffffff" : col;
-    ctx.lineWidth = eraser ? size * 3 : size;
-    ctx.lineCap = "round";
-    ctx.lineJoin = "round";
-    ctx.moveTo(from.x * canvas.width, from.y * canvas.height);
-    ctx.lineTo(to.x * canvas.width, to.y * canvas.height);
-    ctx.stroke();
+  const getPos = (canvas: HTMLCanvasElement, e: { clientX: number; clientY: number }) => {
+    const rect = canvas.getBoundingClientRect();
+    return {
+      x: (e.clientX - rect.left) * (canvas.width / rect.width),
+      y: (e.clientY - rect.top) * (canvas.height / rect.height),
+    };
   };
 
   useEffect(() => {
@@ -100,8 +94,22 @@ function Whiteboard({ sessionId, userId }: { sessionId: number; userId: string }
     ws.onmessage = (event) => {
       try {
         const msg = JSON.parse(event.data);
+        const canvas = canvasRef.current;
+        const ctx = canvas?.getContext("2d");
+        if (!canvas || !ctx) return;
         if (msg.type === "whiteboard-draw" && msg.data) {
-          drawRemoteLine(msg.data.from, msg.data.to, msg.data.color, msg.data.size, msg.data.eraser);
+          const d = msg.data;
+          ctx.beginPath();
+          ctx.strokeStyle = d.eraser ? "#ffffff" : d.color;
+          ctx.lineWidth = d.eraser ? d.size * 4 : d.size;
+          ctx.lineCap = "round";
+          ctx.lineJoin = "round";
+          ctx.moveTo(d.from.x * canvas.width, d.from.y * canvas.height);
+          ctx.lineTo(d.to.x * canvas.width, d.to.y * canvas.height);
+          ctx.stroke();
+        } else if (msg.type === "whiteboard-clear") {
+          ctx.fillStyle = "#ffffff";
+          ctx.fillRect(0, 0, canvas.width, canvas.height);
         }
       } catch {}
     };
@@ -109,38 +117,39 @@ function Whiteboard({ sessionId, userId }: { sessionId: number; userId: string }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sessionId, userId]);
 
-  const getPos = (canvas: HTMLCanvasElement, e: { clientX: number; clientY: number }) => {
-    const rect = canvas.getBoundingClientRect();
-    return {
-      x: (e.clientX - rect.left) * (canvas.width / rect.width),
-      y: (e.clientY - rect.top) * (canvas.height / rect.height),
-    };
-  };
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+    ctx.fillStyle = "#ffffff";
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+  }, []);
 
   const startDrawing = (e: React.MouseEvent | React.TouchEvent) => {
+    e.preventDefault();
     const canvas = canvasRef.current;
     if (!canvas) return;
     setIsDrawing(true);
-    const pos = getPos(canvas, "touches" in e ? e.touches[0] : e.nativeEvent as MouseEvent);
-    lastPos.current = pos;
+    lastPos.current = getPos(canvas, "touches" in e ? e.touches[0] : e.nativeEvent as MouseEvent);
   };
 
   const draw = (e: React.MouseEvent | React.TouchEvent) => {
     if (!isDrawing) return;
+    e.preventDefault();
     const canvas = canvasRef.current;
     const ctx = canvas?.getContext("2d");
     if (!canvas || !ctx || !lastPos.current) return;
-    e.preventDefault();
     const pos = getPos(canvas, "touches" in e ? e.touches[0] : e.nativeEvent as MouseEvent);
+    const isEraser = tool === "eraser";
     ctx.beginPath();
-    ctx.moveTo(lastPos.current.x, lastPos.current.y);
-    ctx.lineTo(pos.x, pos.y);
     ctx.strokeStyle = isEraser ? "#ffffff" : color;
-    ctx.lineWidth = isEraser ? 20 : lineSize;
+    ctx.lineWidth = isEraser ? lineSize * 4 : lineSize;
     ctx.lineCap = "round";
     ctx.lineJoin = "round";
+    ctx.moveTo(lastPos.current.x, lastPos.current.y);
+    ctx.lineTo(pos.x, pos.y);
     ctx.stroke();
-    // Broadcast to partner (normalized coordinates)
     if (wsRef.current?.readyState === WebSocket.OPEN) {
       wsRef.current.send(JSON.stringify({
         type: "whiteboard-draw",
@@ -154,66 +163,58 @@ function Whiteboard({ sessionId, userId }: { sessionId: number; userId: string }
     lastPos.current = pos;
   };
 
-  const stopDrawing = () => {
-    setIsDrawing(false);
-    lastPos.current = null;
-  };
+  const stopDrawing = () => { setIsDrawing(false); lastPos.current = null; };
 
-  const clearCanvas = () => {
+  const clearBoard = () => {
     const canvas = canvasRef.current;
     const ctx = canvas?.getContext("2d");
     if (canvas && ctx) {
       ctx.fillStyle = "#ffffff";
       ctx.fillRect(0, 0, canvas.width, canvas.height);
+      if (wsRef.current?.readyState === WebSocket.OPEN) {
+        wsRef.current.send(JSON.stringify({ type: "whiteboard-clear" }));
+      }
     }
   };
 
-  useEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return;
-    ctx.fillStyle = "#ffffff";
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
-  }, []);
-
-  const COLORS = ["#1e1e1e", "#e03e3e", "#2563eb", "#16a34a", "#d97706", "#7c3aed"];
-  const SIZES = [2, 4, 8];
+  const COLORS = ["#1e1e1e", "#ef4444", "#3b82f6", "#22c55e", "#f59e0b", "#8b5cf6", "#ec4899", "#06b6d4"];
+  const SIZES = [2, 4, 8, 16];
 
   return (
     <div className="flex flex-col h-full gap-2">
       {/* Toolbar */}
-      <div className="flex items-center gap-2 p-2 bg-muted/30 rounded-lg flex-wrap">
-        <div className="flex gap-1">
+      <div className="flex items-center gap-2 flex-wrap shrink-0">
+        <div className="flex gap-1.5 flex-wrap">
           {COLORS.map(c => (
-            <button key={c} onClick={() => { setColor(c); setIsEraser(false); }}
-              className={`w-6 h-6 rounded-full border-2 transition-all ${color === c && !isEraser ? "border-primary scale-110" : "border-transparent"}`}
+            <button key={c} type="button" onClick={() => { setColor(c); setTool("pen"); }}
+              className={`w-6 h-6 rounded-full border-2 transition-all shrink-0 ${color === c && tool === "pen" ? "border-primary scale-125 shadow" : "border-white/60 dark:border-border hover:scale-110"}`}
               style={{ backgroundColor: c }} />
           ))}
         </div>
-        <div className="flex gap-1 ml-2">
+        <div className="h-5 w-px bg-border/40 mx-0.5 hidden sm:block" />
+        <div className="flex gap-1">
           {SIZES.map(s => (
-            <button key={s} onClick={() => { setLineSize(s); setIsEraser(false); }}
-              className={`flex items-center justify-center w-7 h-7 rounded-md border transition-all ${lineSize === s && !isEraser ? "border-primary bg-primary/10" : "border-border hover:bg-muted"}`}>
-              <div className="rounded-full bg-foreground" style={{ width: s * 2, height: s * 2 }} />
+            <button key={s} type="button" onClick={() => { setLineSize(s); setTool("pen"); }}
+              className={`w-7 h-7 rounded-md border transition-all flex items-center justify-center ${lineSize === s && tool === "pen" ? "border-primary bg-primary/10" : "border-border hover:bg-muted"}`}>
+              <div className="rounded-full bg-foreground" style={{ width: Math.min(s * 2, 16), height: Math.min(s * 2, 16) }} />
             </button>
           ))}
         </div>
-        <button onClick={() => setIsEraser(!isEraser)}
-          className={`px-2 py-1 text-xs rounded-md border transition-all ${isEraser ? "border-primary bg-primary/10 text-primary" : "border-border hover:bg-muted"}`}>
-          Eraser
+        <button type="button" onClick={() => setTool(t => t === "eraser" ? "pen" : "eraser")}
+          className={`px-2.5 py-1 text-xs rounded-md border transition-all ${tool === "eraser" ? "border-primary bg-primary/10 text-primary font-medium" : "border-border hover:bg-muted"}`}>
+          {tool === "eraser" ? "Eraser ✕" : "Pen ✎"}
         </button>
-        <button onClick={clearCanvas}
-          className="ml-auto px-2 py-1 text-xs rounded-md border border-border hover:bg-destructive/10 hover:text-destructive hover:border-destructive transition-all">
-          Clear
+        <button type="button" onClick={clearBoard}
+          className="ml-auto px-2.5 py-1 text-xs rounded-md border border-border hover:bg-destructive/10 hover:text-destructive hover:border-destructive transition-all">
+          Clear all
         </button>
       </div>
-      {/* Canvas */}
-      <div className="flex-1 rounded-lg border border-border overflow-hidden bg-white">
+      {/* Canvas — fills all remaining height */}
+      <div className="flex-1 rounded-xl border border-border/60 overflow-hidden bg-white min-h-0">
         <canvas
           ref={canvasRef}
-          width={1200}
-          height={800}
+          width={1600}
+          height={900}
           className="w-full h-full cursor-crosshair touch-none"
           onMouseDown={startDrawing}
           onMouseMove={draw}
@@ -374,16 +375,17 @@ export function SessionDetail() {
     });
   };
 
-  const searchGifs = (q: string, type: "gif" | "sticker") => {
+  const searchGifs = (q: string, type: "gif" | "sticker", immediate = false) => {
     if (gifTimerRef.current) clearTimeout(gifTimerRef.current);
+    const delay = immediate || !q.trim() ? 0 : 400;
     gifTimerRef.current = setTimeout(async () => {
       setGifLoading(true);
       try {
         const apiKey = import.meta.env.VITE_GIPHY_API_KEY || "dc6zaTOxFJmzC";
         const endpoint = type === "sticker" ? "stickers" : "gifs";
         const url = q.trim()
-          ? `https://api.giphy.com/v1/${endpoint}/search?api_key=${apiKey}&q=${encodeURIComponent(q)}&limit=20&rating=pg`
-          : `https://api.giphy.com/v1/${endpoint}/trending?api_key=${apiKey}&limit=20&rating=pg`;
+          ? `https://api.giphy.com/v1/${endpoint}/search?api_key=${apiKey}&q=${encodeURIComponent(q)}&limit=24&rating=pg`
+          : `https://api.giphy.com/v1/${endpoint}/trending?api_key=${apiKey}&limit=24&rating=pg`;
         const res = await fetch(url);
         const json = await res.json();
         setGifResults((json.data || []).map((g: any) => ({
@@ -392,7 +394,7 @@ export function SessionDetail() {
           preview: g.images?.fixed_height_small?.url || g.images?.fixed_height?.url || "",
         })));
       } catch { setGifResults([]); } finally { setGifLoading(false); }
-    }, 400);
+    }, delay);
   };
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -885,8 +887,8 @@ export function SessionDetail() {
         </div>
 
         {/* Chat + Whiteboard Tabs */}
-        <Tabs defaultValue="messages" className="flex-1 flex flex-col overflow-hidden min-h-0">
-          <div className="bg-card border border-border/60 rounded-t-xl px-3 pt-2 shrink-0">
+        <Tabs defaultValue="messages" className="flex-1 flex flex-col overflow-hidden min-h-0 bg-card border border-border/60 rounded-xl shadow-soft">
+          <div className="px-3 pt-2 border-b border-border/40 shrink-0">
             <TabsList className="h-8 bg-transparent gap-1 p-0">
               <TabsTrigger value="messages" className="h-7 text-xs px-3 rounded-md data-[state=active]:bg-primary/10 data-[state=active]:text-primary">
                 Messages
@@ -897,31 +899,34 @@ export function SessionDetail() {
             </TabsList>
           </div>
 
-          <TabsContent value="messages" className="flex-1 flex flex-col overflow-hidden min-h-0 m-0 bg-card border-x border-b border-border/60 rounded-b-xl shadow-soft">
-            <div ref={scrollRef} className="flex-1 overflow-y-auto p-4 space-y-3 bg-muted/5">
-              <div className="text-center py-2">
-                <span className="text-[10px] bg-muted text-muted-foreground px-2.5 py-1 rounded-full font-medium">Session started</span>
+          <TabsContent value="messages" className="flex-1 flex flex-col overflow-hidden min-h-0 m-0">
+            <div ref={scrollRef} className="flex-1 overflow-y-auto px-3 py-2 space-y-1 bg-muted/5">
+              {/* Session started divider */}
+              <div className="flex items-center gap-2 py-3">
+                <div className="flex-1 h-px bg-border/30" />
+                <span className="text-[10px] text-muted-foreground font-medium px-2 select-none">Session started</span>
+                <div className="flex-1 h-px bg-border/30" />
               </div>
               {messages.map((msg: any) => {
                 const isMe = msg.senderId === user?.id;
                 return (
-                  <div key={msg.id} className={`flex ${isMe ? 'justify-end' : 'justify-start'}`}>
-                    <div className={`flex gap-2 max-w-[75%] ${isMe ? 'flex-row-reverse' : 'flex-row'}`}>
+                  <div key={msg.id} className={`flex ${isMe ? 'justify-end' : 'justify-start'} mb-1`}>
+                    <div className={`flex gap-2 max-w-[78%] sm:max-w-[70%] ${isMe ? 'flex-row-reverse' : 'flex-row'}`}>
                       {!isMe && (
                         <Avatar className="w-6 h-6 shrink-0 mt-auto border border-border">
                           <AvatarImage src={otherPerson?.profileImageUrl || ""} />
                           <AvatarFallback className="bg-primary/8 text-primary text-[9px]">{otherPerson?.firstName?.[0]}</AvatarFallback>
                         </Avatar>
                       )}
-                      <div className={`rounded-xl px-3.5 py-2 relative ${isMe ? 'bg-primary text-white rounded-br-sm' : 'bg-card border border-border/50 rounded-bl-sm'}`}>
+                      <div className={`group relative rounded-2xl px-3.5 py-2 ${isMe ? 'bg-primary text-white rounded-tr-sm' : 'bg-muted/60 rounded-tl-sm'}`}>
                         {msg.type === "voice" && msg.fileUrl ? (
                           <audio controls className="w-40 max-w-full" controlsList="nodownload" preload="metadata">
                             <source src={msg.fileUrl} type={msg.fileUrl.startsWith("data:audio/mp4") ? "audio/mp4" : "audio/webm"} />
                           </audio>
                         ) : msg.type === "image" && msg.fileUrl ? (
-                          <img src={msg.fileUrl} alt="Attachment" className="max-h-48 rounded-md" />
+                          <img src={msg.fileUrl} alt="Attachment" className="max-h-52 max-w-full rounded-lg" />
                         ) : msg.type === "video" && msg.fileUrl ? (
-                          <video controls className="max-h-48 rounded-md">
+                          <video controls className="max-h-52 max-w-full rounded-lg">
                             <source src={msg.fileUrl} />
                           </video>
                         ) : msg.type === "document" && msg.fileUrl ? (
@@ -929,18 +934,18 @@ export function SessionDetail() {
                             {msg.content || "Download file"}
                           </a>
                         ) : (
-                          <p className="text-sm leading-relaxed">{renderMessageContent(msg.content || "")}</p>
+                          <p className="text-sm leading-relaxed break-words">{renderMessageContent(msg.content || "")}</p>
                         )}
                         {isMe && (
                           <button
                             type="button"
                             onClick={() => deleteMessage.mutate(msg.id)}
-                            className="absolute -top-2 -right-2 text-[10px] bg-black/40 rounded-full px-1.5 py-0.5"
+                            className="absolute -top-2 -right-2 w-5 h-5 rounded-full bg-zinc-800/80 text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity shadow"
                           >
-                            Delete
+                            <X className="w-2.5 h-2.5" />
                           </button>
                         )}
-                        <span className={`text-[9px] mt-0.5 block opacity-60 ${isMe ? 'text-right' : 'text-left'}`}>
+                        <span className={`text-[9px] mt-0.5 block opacity-50 ${isMe ? 'text-right' : 'text-left'}`}>
                           {msg.createdAt ? format(new Date(msg.createdAt), 'h:mm a') : ''}
                         </span>
                       </div>
@@ -951,7 +956,7 @@ export function SessionDetail() {
             </div>
             {/* Typing indicator */}
             {partnerTyping && (
-              <div className="px-4 py-1.5 bg-card border-t border-border/30 flex items-center gap-1.5">
+              <div className="px-4 py-1.5 flex items-center gap-1.5">
                 <div className="flex gap-0.5 items-end">
                   {[0, 1, 2].map(i => (
                     <span key={i} className="w-1.5 h-1.5 rounded-full bg-muted-foreground/40 animate-bounce" style={{ animationDelay: `${i * 0.15}s` }} />
@@ -968,7 +973,7 @@ export function SessionDetail() {
                 </span>
               </div>
             )}
-            <div className="p-3 bg-card border-t border-border/50 shrink-0">
+            <div className="p-3 border-t border-border/40 shrink-0">
               <form onSubmit={handleSend} className="flex items-center gap-2">
                 {/* File attach */}
                 <input ref={fileInputRef} type="file" className="hidden"
@@ -982,7 +987,7 @@ export function SessionDetail() {
                 {/* Emoji / GIF / Sticker picker */}
                 <Popover open={pickerOpen} onOpenChange={(open) => {
                   setPickerOpen(open);
-                  if (open && emojiTab !== "emoji") searchGifs(gifQuery, emojiTab as "gif" | "sticker");
+                  if (open && emojiTab !== "emoji") searchGifs(gifQuery, emojiTab as "gif" | "sticker", true);
                 }}>
                   <PopoverTrigger asChild>
                     <button type="button"
@@ -995,9 +1000,9 @@ export function SessionDetail() {
                     <div className="flex gap-1 mb-2">
                       {(["emoji", "gif", "sticker"] as const).map(tab => (
                         <button key={tab} type="button"
-                          onClick={() => { setEmojiTab(tab); if (tab !== "emoji") searchGifs(gifQuery, tab as "gif" | "sticker"); }}
+                          onClick={() => { setEmojiTab(tab); if (tab !== "emoji") { setGifQuery(""); setGifResults([]); searchGifs("", tab as "gif" | "sticker", true); } }}
                           className={`flex-1 text-xs py-1 rounded-md font-medium transition-colors ${emojiTab === tab ? "bg-primary text-primary-foreground" : "bg-muted/50 text-muted-foreground hover:bg-muted"}`}>
-                          {tab === "emoji" ? "😀 Emoji" : tab === "gif" ? "GIF" : "Sticker"}
+                          {tab === "emoji" ? "😀 Emoji" : tab === "gif" ? "GIF" : "✨ Sticker"}
                         </button>
                       ))}
                     </div>
@@ -1017,8 +1022,22 @@ export function SessionDetail() {
                           placeholder={`Search ${emojiTab}s...`}
                           value={gifQuery}
                           onChange={e => { setGifQuery(e.target.value); searchGifs(e.target.value, emojiTab as "gif" | "sticker"); }}
-                          className="w-full text-xs rounded-md border border-border/50 bg-muted/30 px-2.5 py-1.5 mb-2 outline-none focus:border-primary"
+                          className="w-full text-xs rounded-md border border-border/50 bg-muted/30 px-2.5 py-1.5 mb-1.5 outline-none focus:border-primary"
                         />
+                        {/* Quick chips */}
+                        <div className="flex gap-1 flex-wrap mb-2">
+                          {["🎉 Party","👏 Nice","😂 LOL","😍 Love","🔥 Fire","💯 Facts","😭 Crying","🤔 Hmm"].map(chip => {
+                            const [, ...words] = chip.split(" ");
+                            const q = words.join(" ").toLowerCase();
+                            return (
+                              <button key={chip} type="button"
+                                onClick={() => { setGifQuery(q); searchGifs(q, emojiTab as "gif" | "sticker", true); }}
+                                className={`text-[10px] px-1.5 py-0.5 rounded-full border transition-colors ${gifQuery === q ? "bg-primary text-white border-primary" : "bg-muted/40 border-border/40 text-muted-foreground hover:bg-muted"}`}>
+                                {chip}
+                              </button>
+                            );
+                          })}
+                        </div>
                         {gifLoading ? (
                           <div className="flex items-center justify-center h-32">
                             <Loader2 className="w-5 h-5 animate-spin text-muted-foreground" />
@@ -1059,7 +1078,7 @@ export function SessionDetail() {
             </div>
           </TabsContent>
 
-          <TabsContent value="whiteboard" className="flex-1 flex flex-col overflow-hidden min-h-[400px] m-0 bg-card border-x border-b border-border/60 rounded-b-xl shadow-soft p-3">
+          <TabsContent value="whiteboard" className="flex-1 flex flex-col overflow-hidden min-h-[400px] m-0 p-3">
             <Whiteboard sessionId={sessionId} userId={String(user?.id || "")} />
           </TabsContent>
         </Tabs>
