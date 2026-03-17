@@ -1,5 +1,5 @@
 import { db } from "./db";
-import { eq, and, or, sql, desc } from "drizzle-orm";
+import { eq, and, or, sql, desc, isNull } from "drizzle-orm";
 import { 
   users, courses, tutorCourses, availabilities, tutoringSessions, messages, reviews,
   type User, type UpdateProfileRequest,
@@ -276,7 +276,7 @@ export class DatabaseStorage implements IStorage {
     })
     .from(messages)
     .innerJoin(users, eq(messages.senderId, users.id))
-    .where(eq(messages.sessionId, sessionId))
+    .where(and(eq(messages.sessionId, sessionId), isNull(messages.deletedAt)))
     .orderBy(messages.createdAt);
 
     return results.map(r => ({ ...r.message, sender: r.sender }));
@@ -289,7 +289,8 @@ export class DatabaseStorage implements IStorage {
 
   async deleteMessage(id: number, userId: string): Promise<void> {
     await db
-      .delete(messages)
+      .update(messages)
+      .set({ deletedAt: new Date() })
       .where(and(eq(messages.id, id), eq(messages.senderId, userId)));
   }
 

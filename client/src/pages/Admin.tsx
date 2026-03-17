@@ -8,7 +8,7 @@ import {
   TrendingDown, Search, Trash2, Ban, CheckCircle, XCircle,
   MoreVertical, RefreshCw, Download, Plus, Eye, Edit3,
   Activity, Bell, X, BarChart3, PieChartIcon, LineChartIcon,
-  AlertTriangle, Clock, Globe, Loader2, ChevronDown, KeyRound, ArrowLeft, Menu,
+  AlertTriangle, Clock, Globe, Loader2, ChevronDown, KeyRound, ArrowLeft, Menu, MessageSquare,
 } from "lucide-react";
 import {
   LineChart, Line, BarChart, Bar, PieChart, Pie, Cell,
@@ -41,6 +41,7 @@ const NAV = [
   { id: "users", label: "Users", icon: Users },
   { id: "sessions", label: "Sessions", icon: CalendarDays },
   { id: "courses", label: "Courses", icon: BookOpen },
+  { id: "messages", label: "Messages", icon: MessageSquare },
   { id: "reports", label: "Reports", icon: Flag },
   { id: "audit", label: "Audit Logs", icon: FileText },
   { id: "settings", label: "Settings", icon: Settings },
@@ -154,6 +155,7 @@ export function Admin() {
           {tab === "users" && <UsersTab />}
           {tab === "sessions" && <SessionsTab />}
           {tab === "courses" && <CoursesTab />}
+          {tab === "messages" && <MessagesTab />}
           {tab === "reports" && <ReportsTab />}
           {tab === "audit" && <AuditTab />}
           {tab === "settings" && <SettingsTab currentUser={user} />}
@@ -772,6 +774,104 @@ function CoursesTab() {
   );
 }
 
+// ── Messages Tab ──────────────────────────────────────────────────
+function MessagesTab() {
+  const queryClient = useQueryClient();
+  const { toast } = useToast();
+  const [search, setSearch] = useState("");
+  const [includeDeleted, setIncludeDeleted] = useState(true);
+  const [page, setPage] = useState(1);
+  const [debouncedSearch, setDebouncedSearch] = useState("");
+
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedSearch(search), 400);
+    return () => clearTimeout(t);
+  }, [search]);
+
+  const { data: msgs, isLoading } = useQuery({
+    queryKey: ["/api/admin/messages", debouncedSearch, includeDeleted, page],
+    queryFn: () => adminFetch(`/api/admin/messages?search=${encodeURIComponent(debouncedSearch)}&includeDeleted=${includeDeleted}&page=${page}&limit=50`),
+  });
+
+  const deleteMsg = useMutation({
+    mutationFn: (id: number) => adminFetch(`/api/admin/messages/${id}`, { method: "DELETE" }),
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["/api/admin/messages"] }); toast({ title: "Message permanently deleted" }); },
+    onError: (e: any) => toast({ title: e.message, variant: "destructive" }),
+  });
+
+  const TYPE_COLOR: Record<string, string> = {
+    text: "text-blue-400 bg-blue-500/10",
+    voice: "text-purple-400 bg-purple-500/10",
+    image: "text-green-400 bg-green-500/10",
+    video: "text-amber-400 bg-amber-500/10",
+    document: "text-gray-400 bg-white/5",
+  };
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <h1 className="text-xl font-bold text-white">Message Moderation</h1>
+        <span className="text-xs text-gray-500">{msgs?.length ?? 0} messages shown</span>
+      </div>
+      <div className="flex items-center gap-3 flex-wrap">
+        <div className="relative flex-1 min-w-[200px]">
+          <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-500" />
+          <input
+            value={search}
+            onChange={e => { setSearch(e.target.value); setPage(1); }}
+            placeholder="Search by content or user..."
+            className="w-full pl-8 pr-3 h-8 bg-[#16213e] border border-white/5 rounded-lg text-xs text-gray-200 placeholder-gray-600 outline-none focus:border-indigo-500/50"
+          />
+        </div>
+        <label className="flex items-center gap-2 text-xs text-gray-400 cursor-pointer select-none">
+          <input type="checkbox" checked={includeDeleted} onChange={e => setIncludeDeleted(e.target.checked)} className="accent-indigo-500" />
+          Show deleted messages
+        </label>
+      </div>
+      <div className="space-y-2">
+        {isLoading ? <LoadingSpinner /> : !msgs?.length ? (
+          <div className="text-center py-12 text-gray-500 text-xs bg-[#16213e] rounded-xl border border-white/5">No messages found</div>
+        ) : msgs.map((m: any) => (
+          <div key={m.id} className={cn("bg-[#16213e] rounded-xl p-3.5 border", m.deletedAt ? "border-red-500/20 opacity-70" : "border-white/5")}>
+            <div className="flex items-start justify-between gap-3">
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2 mb-1.5 flex-wrap">
+                  <span className={cn("text-[10px] uppercase tracking-wider font-bold px-2 py-0.5 rounded-md", TYPE_COLOR[m.type] || "text-gray-400 bg-white/5")}>{m.type}</span>
+                  {m.deletedAt && <span className="text-[10px] font-semibold text-red-400 bg-red-500/10 px-2 py-0.5 rounded-md">Deleted</span>}
+                  <span className="text-[10px] text-gray-600">Session #{m.sessionId} · {m.session?.courseCode || "—"}</span>
+                </div>
+                <div className="flex items-center gap-2 mb-1">
+                  <span className="text-xs font-semibold text-indigo-300">{m.sender?.firstName} {m.sender?.lastName}</span>
+                  <span className="text-[10px] text-gray-600">{m.sender?.email}</span>
+                </div>
+                {m.type === "text" && m.content ? (
+                  <p className="text-xs text-gray-200 bg-white/5 rounded-lg px-2.5 py-1.5 mt-1">{m.content}</p>
+                ) : m.type !== "text" ? (
+                  <p className="text-xs text-gray-500 italic mt-1">[{m.type} attachment{m.type === "voice" ? " — audio note" : ""}]</p>
+                ) : null}
+                <p className="text-[10px] text-gray-600 mt-1.5">{m.createdAt ? format(new Date(m.createdAt), "MMM dd, yyyy HH:mm") : ""}</p>
+              </div>
+              <button
+                onClick={() => { if (confirm("Permanently delete this message?")) deleteMsg.mutate(m.id); }}
+                className="w-7 h-7 rounded-lg bg-red-500/10 text-red-400 hover:bg-red-500/20 flex items-center justify-center shrink-0"
+                title="Permanently delete"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          </div>
+        ))}
+      </div>
+      {msgs?.length === 50 && (
+        <div className="flex justify-center gap-2 pt-2">
+          {page > 1 && <button onClick={() => setPage(p => p - 1)} className="px-3 h-8 rounded-lg text-xs bg-[#16213e] text-gray-400 border border-white/5">← Prev</button>}
+          <button onClick={() => setPage(p => p + 1)} className="px-3 h-8 rounded-lg text-xs bg-[#16213e] text-gray-400 border border-white/5">Next →</button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── Reports Tab ───────────────────────────────────────────────────
 function ReportsTab() {
   const queryClient = useQueryClient();
@@ -822,6 +922,13 @@ function ReportsTab() {
                 </div>
                 <p className="text-xs text-white"><span className="text-gray-400">Reporter:</span> {r.reporter?.firstName} {r.reporter?.lastName} ({r.reporter?.email})</p>
                 <p className="text-xs text-white mt-0.5"><span className="text-gray-400">Reported:</span> {r.reported?.firstName} {r.reported?.lastName} ({r.reported?.email})</p>
+                {r.reportedMessage && (
+                  <div className="mt-1.5 bg-white/5 border border-white/10 rounded-lg px-2.5 py-1.5">
+                    <p className="text-[10px] text-gray-500 uppercase tracking-wider mb-0.5">Reported message</p>
+                    <p className="text-xs text-gray-200">{r.reportedMessage.content || `[${r.reportedMessage.type} attachment]`}</p>
+                    {r.reportedMessage.deletedAt && <span className="text-[10px] text-red-400">(already deleted)</span>}
+                  </div>
+                )}
                 {r.details && <p className="text-xs text-gray-400 mt-1.5 italic">"{r.details}"</p>}
                 <p className="text-[10px] text-gray-600 mt-1.5">{r.createdAt ? format(new Date(r.createdAt), "MMM dd, yyyy HH:mm") : ""}</p>
               </div>

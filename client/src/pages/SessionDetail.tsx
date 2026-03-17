@@ -12,7 +12,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useToast } from "@/hooks/use-toast";
 import {
   Send, Loader2, ArrowLeft, Video, VideoOff, Phone,
-  Mic, MicOff, PhoneOff, CalendarPlus, Minimize2, Maximize2, X, Check, Paperclip, Edit3, Save, Lock, Signal, PhoneCall, Monitor, MonitorOff, FileDown, CheckCheck, Pencil, Volume2, VolumeX, Smile
+  Mic, MicOff, PhoneOff, CalendarPlus, Minimize2, Maximize2, X, Check, Paperclip, Edit3, Save, Lock, Signal, PhoneCall, Monitor, MonitorOff, FileDown, CheckCheck, Pencil, Volume2, VolumeX, Smile, Play, Pause, Trash2, CheckSquare, Square, Flag
 } from "lucide-react";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -229,6 +229,104 @@ function Whiteboard({ sessionId, userId }: { sessionId: number; userId: string }
   );
 }
 
+function VoiceNote({ src, isMe }: { src: string; isMe: boolean }) {
+  const audioRef = useRef<HTMLAudioElement>(null);
+  const [playing, setPlaying] = useState(false);
+  const [muted, setMuted] = useState(false);
+  const [progress, setProgress] = useState(0);
+  const [duration, setDuration] = useState(0);
+  const [currentTime, setCurrentTime] = useState(0);
+
+  const toggle = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    const a = audioRef.current;
+    if (!a) return;
+    if (playing) { a.pause(); setPlaying(false); }
+    else { a.play(); setPlaying(true); }
+  };
+
+  const handleTimeUpdate = () => {
+    const a = audioRef.current;
+    if (!a) return;
+    setCurrentTime(a.currentTime);
+    setProgress(a.duration ? (a.currentTime / a.duration) * 100 : 0);
+  };
+
+  const handleLoaded = () => {
+    const a = audioRef.current;
+    if (a && isFinite(a.duration)) setDuration(a.duration);
+  };
+
+  const handleSeek = (e: React.ChangeEvent<HTMLInputElement>) => {
+    e.stopPropagation();
+    const a = audioRef.current;
+    if (!a || !a.duration) return;
+    const val = parseFloat(e.target.value);
+    a.currentTime = (val / 100) * a.duration;
+    setProgress(val);
+  };
+
+  const toggleMute = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    const a = audioRef.current;
+    if (!a) return;
+    a.muted = !muted;
+    setMuted(!muted);
+  };
+
+  const fmt = (s: number) =>
+    isFinite(s) ? `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, "0")}` : "—:——";
+
+  return (
+    <div className="flex items-center gap-2.5 py-1 min-w-[200px] max-w-[280px]">
+      <audio
+        ref={audioRef}
+        src={src}
+        onTimeUpdate={handleTimeUpdate}
+        onLoadedMetadata={handleLoaded}
+        onEnded={() => setPlaying(false)}
+        muted={muted}
+        preload="metadata"
+      />
+      <button
+        type="button"
+        onClick={toggle}
+        className={`w-10 h-10 shrink-0 rounded-full flex items-center justify-center transition-colors ${
+          isMe ? "bg-white/25 hover:bg-white/40" : "bg-primary/15 hover:bg-primary/25"
+        }`}
+      >
+        {playing ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4 ml-0.5" />}
+      </button>
+      <div className="flex-1 flex flex-col gap-1.5 min-w-0">
+        <input
+          type="range"
+          min={0}
+          max={100}
+          step={0.5}
+          value={progress}
+          onChange={handleSeek}
+          onClick={(e) => e.stopPropagation()}
+          className="w-full h-1.5 rounded-full appearance-none cursor-pointer"
+          style={{ accentColor: isMe ? "white" : "hsl(var(--primary))" }}
+        />
+        <div className={`flex justify-between text-[10px] ${isMe ? "text-white/60" : "text-muted-foreground"}`}>
+          <span>{fmt(currentTime)}</span>
+          <span>{duration ? fmt(duration) : "—:——"}</span>
+        </div>
+      </div>
+      <button
+        type="button"
+        onClick={toggleMute}
+        className={`w-9 h-9 shrink-0 rounded-full flex items-center justify-center transition-colors ${
+          isMe ? "hover:bg-white/25" : "hover:bg-primary/15"
+        }`}
+      >
+        {muted ? <VolumeX className="w-4 h-4" /> : <Volume2 className="w-4 h-4" />}
+      </button>
+    </div>
+  );
+}
+
 export function SessionDetail() {
   const [, params] = useRoute("/sessions/:id");
   const sessionId = parseInt(params?.id || "0");
@@ -280,6 +378,57 @@ export function SessionDetail() {
   const [gifResults, setGifResults] = useState<Array<{ id: string; url: string; preview: string }>>([]);
   const [gifLoading, setGifLoading] = useState(false);
   const gifTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [deleteConfirm, setDeleteConfirm] = useState<{ ids: number[] } | null>(null);
+  const [selectMode, setSelectMode] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
+  const [reportTarget, setReportTarget] = useState<{ userId: string; messageId: number; content: string } | null>(null);
+  const [reportReason, setReportReason] = useState("");
+  const [reportDetails, setReportDetails] = useState("");
+  const [reportSubmitting, setReportSubmitting] = useState(false);
+
+  const toggleSelect = (id: number) => {
+    setSelectedIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  };
+
+  const exitSelectMode = () => {
+    setSelectMode(false);
+    setSelectedIds(new Set());
+  };
+
+  const confirmDelete = (ids: number[]) => setDeleteConfirm({ ids });
+
+  const executeDelete = () => {
+    if (!deleteConfirm) return;
+    deleteConfirm.ids.forEach(id => deleteMessage.mutate(id));
+    setDeleteConfirm(null);
+    exitSelectMode();
+  };
+
+  const submitReport = async () => {
+    if (!reportTarget || !reportReason) return;
+    setReportSubmitting(true);
+    try {
+      const res = await fetch(`/api/users/${reportTarget.userId}/report`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ reason: reportReason, details: reportDetails || undefined, messageId: reportTarget.messageId }),
+      });
+      if (!res.ok) throw new Error("Failed");
+      toast({ title: "Report submitted", description: "Our team will review it shortly." });
+      setReportTarget(null);
+      setReportReason("");
+      setReportDetails("");
+    } catch {
+      toast({ title: "Failed to submit report", variant: "destructive" });
+    } finally {
+      setReportSubmitting(false);
+    }
+  };
 
   const updateNotes = useMutation({
     mutationFn: async (notes: string) => {
@@ -889,7 +1038,7 @@ export function SessionDetail() {
 
         {/* Chat + Whiteboard Tabs */}
         <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as "messages" | "whiteboard")} className="flex-1 flex flex-col min-h-0 bg-card border border-border/60 rounded-xl shadow-soft overflow-hidden">
-          <div className="px-3 pt-2 border-b border-border/40 shrink-0">
+          <div className="px-3 pt-2 border-b border-border/40 shrink-0 flex items-center justify-between">
             <TabsList className="h-8 bg-transparent gap-1 p-0">
               <TabsTrigger value="messages" className="h-7 text-xs px-3 rounded-md data-[state=active]:bg-primary/10 data-[state=active]:text-primary">
                 Messages
@@ -898,10 +1047,122 @@ export function SessionDetail() {
                 <Pencil className="w-3 h-3" /> Whiteboard
               </TabsTrigger>
             </TabsList>
+            {activeTab === "messages" && !selectMode && (
+              <button
+                type="button"
+                onClick={() => setSelectMode(true)}
+                title="Select messages"
+                className="w-7 h-7 flex items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+              >
+                <CheckSquare className="w-3.5 h-3.5" />
+              </button>
+            )}
           </div>
 
           {/* Messages panel — plain div, shown/hidden via class */}
-          <div className={`flex-1 flex flex-col min-h-0${activeTab !== "messages" ? " hidden" : ""}`}>
+          <div className={`flex-1 flex flex-col min-h-0 relative${activeTab !== "messages" ? " hidden" : ""}`}>
+            {/* Select mode toolbar */}
+            {selectMode && (
+              <div className="flex items-center justify-between px-3 py-1.5 bg-primary/10 border-b border-border/40 shrink-0">
+                <span className="text-xs text-primary font-medium">{selectedIds.size} selected</span>
+                <div className="flex items-center gap-2">
+                  {selectedIds.size > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => confirmDelete(Array.from(selectedIds))}
+                      className="flex items-center gap-1 text-xs text-destructive hover:text-destructive/80 font-medium"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" /> Delete
+                    </button>
+                  )}
+                  <button type="button" onClick={exitSelectMode} className="text-xs text-muted-foreground hover:text-foreground">
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* Report modal */}
+            {reportTarget && (
+              <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm" style={{ borderRadius: "inherit" }}>
+                <div className="bg-card border border-border rounded-2xl shadow-xl px-5 py-5 mx-4 w-full max-w-sm">
+                  <div className="flex items-center justify-between mb-3">
+                    <h3 className="text-sm font-semibold flex items-center gap-1.5"><Flag className="w-3.5 h-3.5 text-destructive" /> Report Message</h3>
+                    <button type="button" onClick={() => { setReportTarget(null); setReportReason(""); setReportDetails(""); }} className="text-muted-foreground hover:text-foreground">
+                      <X className="w-4 h-4" />
+                    </button>
+                  </div>
+                  {reportTarget.content && (
+                    <div className="bg-muted/40 rounded-lg px-3 py-2 mb-3 text-xs text-muted-foreground italic truncate">"{reportTarget.content}"</div>
+                  )}
+                  <p className="text-xs text-muted-foreground mb-2">Why are you reporting this message?</p>
+                  <div className="grid grid-cols-2 gap-1.5 mb-3">
+                    {[
+                      { value: "foul_language", label: "🤬 Foul Language" },
+                      { value: "harassment", label: "😡 Harassment" },
+                      { value: "threats", label: "⚠️ Threats" },
+                      { value: "inappropriate", label: "🚫 Inappropriate" },
+                      { value: "spam", label: "📢 Spam" },
+                      { value: "cheating", label: "📋 Cheating" },
+                      { value: "impersonation", label: "🎭 Impersonation" },
+                      { value: "other", label: "• Other" },
+                    ].map(r => (
+                      <button
+                        key={r.value}
+                        type="button"
+                        onClick={() => setReportReason(r.value)}
+                        className={`text-xs px-2.5 py-2 rounded-lg border text-left transition-colors ${
+                          reportReason === r.value
+                            ? "border-destructive bg-destructive/10 text-destructive"
+                            : "border-border hover:bg-muted text-muted-foreground"
+                        }`}
+                      >
+                        {r.label}
+                      </button>
+                    ))}
+                  </div>
+                  <textarea
+                    value={reportDetails}
+                    onChange={e => setReportDetails(e.target.value)}
+                    placeholder="Additional details (optional)..."
+                    rows={2}
+                    className="w-full text-xs rounded-lg border border-border bg-muted/20 px-3 py-2 resize-none outline-none focus:border-primary mb-3"
+                  />
+                  <div className="flex gap-2">
+                    <button type="button" onClick={() => { setReportTarget(null); setReportReason(""); setReportDetails(""); }} className="flex-1 h-9 rounded-lg border border-border text-sm hover:bg-muted transition-colors">
+                      Cancel
+                    </button>
+                    <button
+                      type="button"
+                      onClick={submitReport}
+                      disabled={!reportReason || reportSubmitting}
+                      className="flex-1 h-9 rounded-lg bg-destructive text-destructive-foreground text-sm font-medium hover:bg-destructive/90 transition-colors disabled:opacity-50"
+                    >
+                      {reportSubmitting ? "Submitting..." : "Submit Report"}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Delete confirmation dialog */}
+            {deleteConfirm && (
+              <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm" style={{ borderRadius: "inherit" }}>
+                <div className="bg-card border border-border rounded-2xl shadow-xl px-6 py-5 mx-4 w-full max-w-xs">
+                  <h3 className="text-sm font-semibold mb-1">Delete {deleteConfirm.ids.length > 1 ? `${deleteConfirm.ids.length} messages` : "message"}?</h3>
+                  <p className="text-xs text-muted-foreground mb-4">This will remove {deleteConfirm.ids.length > 1 ? "these messages" : "this message"} for everyone. This can't be undone.</p>
+                  <div className="flex gap-2">
+                    <button type="button" onClick={() => setDeleteConfirm(null)} className="flex-1 h-9 rounded-lg border border-border text-sm hover:bg-muted transition-colors">
+                      Cancel
+                    </button>
+                    <button type="button" onClick={executeDelete} className="flex-1 h-9 rounded-lg bg-destructive text-destructive-foreground text-sm font-medium hover:bg-destructive/90 transition-colors">
+                      Delete
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+
             <div ref={scrollRef} className="flex-1 overflow-y-auto min-h-0 px-3 py-2 space-y-1 bg-muted/5">
               {/* Session started divider */}
               <div className="flex items-center gap-2 py-3">
@@ -911,8 +1172,22 @@ export function SessionDetail() {
               </div>
               {messages.map((msg: any) => {
                 const isMe = msg.senderId === user?.id;
+                const isSelected = selectedIds.has(msg.id);
                 return (
-                  <div key={msg.id} className={`flex ${isMe ? 'justify-end' : 'justify-start'} mb-1`}>
+                  <div
+                    key={msg.id}
+                    className={`flex ${isMe ? 'justify-end' : 'justify-start'} mb-1 ${selectMode ? 'cursor-pointer' : ''}`}
+                    onClick={selectMode && isMe ? () => toggleSelect(msg.id) : undefined}
+                  >
+                    {/* Select checkbox */}
+                    {selectMode && isMe && (
+                      <div className="flex items-center mr-2 mt-auto mb-1">
+                        {isSelected
+                          ? <CheckSquare className="w-4 h-4 text-primary" />
+                          : <Square className="w-4 h-4 text-muted-foreground" />
+                        }
+                      </div>
+                    )}
                     <div className={`flex gap-2 max-w-[78%] sm:max-w-[70%] ${isMe ? 'flex-row-reverse' : 'flex-row'}`}>
                       {!isMe && (
                         <Avatar className="w-6 h-6 shrink-0 mt-auto border border-border">
@@ -920,11 +1195,9 @@ export function SessionDetail() {
                           <AvatarFallback className="bg-primary/8 text-primary text-[9px]">{otherPerson?.firstName?.[0]}</AvatarFallback>
                         </Avatar>
                       )}
-                      <div className={`group relative rounded-2xl px-3.5 py-2 ${isMe ? 'bg-primary text-white rounded-tr-sm' : 'bg-muted/60 rounded-tl-sm'}`}>
+                      <div className={`group relative rounded-2xl px-3.5 py-2 ${isMe ? 'bg-primary text-white rounded-tr-sm' : 'bg-muted/60 rounded-tl-sm'} ${isSelected ? 'ring-2 ring-primary' : ''}`}>
                         {msg.type === "voice" && msg.fileUrl ? (
-                          <audio controls className="w-40 max-w-full" controlsList="nodownload" preload="metadata">
-                            <source src={msg.fileUrl} type={msg.fileUrl.startsWith("data:audio/mp4") ? "audio/mp4" : "audio/webm"} />
-                          </audio>
+                          <VoiceNote src={msg.fileUrl} isMe={isMe} />
                         ) : msg.type === "image" && msg.fileUrl ? (
                           <img src={msg.fileUrl} alt="Attachment" className="max-h-52 max-w-full rounded-lg" />
                         ) : msg.type === "video" && msg.fileUrl ? (
@@ -938,13 +1211,28 @@ export function SessionDetail() {
                         ) : (
                           <p className="text-sm leading-relaxed break-words">{renderMessageContent(msg.content || "")}</p>
                         )}
-                        {isMe && (
+                        {isMe && !selectMode && (
                           <button
                             type="button"
-                            onClick={() => deleteMessage.mutate(msg.id)}
-                            className="absolute -top-2 -right-2 w-5 h-5 rounded-full bg-zinc-800/80 text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity shadow"
+                            onClick={(e) => { e.stopPropagation(); confirmDelete([msg.id]); }}
+                            className="absolute -top-2 -right-2 w-6 h-6 rounded-full bg-zinc-800/90 text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity shadow"
                           >
-                            <X className="w-2.5 h-2.5" />
+                            <X className="w-3 h-3" />
+                          </button>
+                        )}
+                        {!isMe && !selectMode && (
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setReportTarget({ userId: msg.senderId, messageId: msg.id, content: msg.type === "text" ? (msg.content || "") : "" });
+                              setReportReason("");
+                              setReportDetails("");
+                            }}
+                            className="absolute -top-2 -left-2 w-6 h-6 rounded-full bg-zinc-800/90 text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity shadow"
+                            title="Report message"
+                          >
+                            <Flag className="w-3 h-3" />
                           </button>
                         )}
                         <span className={`text-[9px] mt-0.5 block opacity-50 ${isMe ? 'text-right' : 'text-left'}`}>

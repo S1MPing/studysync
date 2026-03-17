@@ -331,9 +331,10 @@ export function registerLocalAuthRoutes(app: Express): void {
       if (reportedId === req.userId) {
         return res.status(400).json({ message: "Cannot report yourself" });
       }
-      const { reason, details } = z.object({
+      const { reason, details, messageId } = z.object({
         reason: z.string().min(1),
         details: z.string().optional(),
+        messageId: z.number().int().optional(),
       }).parse(req.body);
 
       const [report] = await db.insert(reports).values({
@@ -341,6 +342,7 @@ export function registerLocalAuthRoutes(app: Express): void {
         reportedId,
         reason,
         details: details || null,
+        messageId: messageId || null,
       }).returning();
 
       await createAuditLog({

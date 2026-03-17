@@ -101,6 +101,7 @@ export const messages = pgTable("messages", {
   type: text("type", { enum: ["text", "voice", "image", "document", "video"] }).default("text"),
   fileUrl: text("file_url"),
   createdAt: timestamp("created_at").defaultNow(),
+  deletedAt: timestamp("deleted_at"),
 });
 
 export const reviews = pgTable("reviews", {
@@ -136,7 +137,8 @@ export const reports = pgTable("reports", {
   id: serial("id").primaryKey(),
   reporterId: varchar("reporter_id").references(() => users.id, { onDelete: "cascade" }).notNull(),
   reportedId: varchar("reported_id").references(() => users.id, { onDelete: "cascade" }).notNull(),
-  reason: text("reason").notNull(), // "spam", "harassment", "inappropriate", "fake", "other"
+  messageId: integer("message_id").references(() => messages.id, { onDelete: "set null" }),
+  reason: text("reason").notNull(), // "foul_language", "harassment", "inappropriate", "threats", "spam", "cheating", "impersonation", "other"
   details: text("details"),
   status: text("status", { enum: ["pending", "reviewed", "dismissed", "actioned"] }).default("pending"),
   createdAt: timestamp("created_at").defaultNow(),

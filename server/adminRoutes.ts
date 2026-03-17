@@ -335,6 +335,56 @@ export function registerAdminRoutes(app: Express) {
     }
   });
 
+  // ── MESSAGES (admin moderation) ────────────────────────────
+  app.get("/api/admin/messages", isAdmin, async (req: any, res) => {
+    try {
+      const { search, sessionId, includeDeleted, page = "1", limit = "50" } = req.query as any;
+      const offset = (parseInt(page) - 1) * parseInt(limit);
+
+      const results = await db.execute(sql`
+        SELECT m.*,
+          json_build_object('id', u.id, 'firstName', u.first_name, 'lastName', u.last_name, 'email', u.email, 'profileImageUrl', u.profile_image_url) AS sender,
+          json_build_object('id', ts.id, 'studentId', ts.student_id, 'tutorId', ts.tutor_id, 'courseCode', c.code) AS session
+        FROM messages m
+        INNER JOIN users u ON m.sender_id = u.id
+        INNER JOIN tutoring_sessions ts ON m.session_id = ts.id
+        LEFT JOIN courses c ON ts.course_id = c.id
+        WHERE 1=1
+          ${includeDeleted !== "true" ? sql`AND m.deleted_at IS NULL` : sql``}
+          ${sessionId ? sql`AND m.session_id = ${parseInt(sessionId)}` : sql``}
+          ${search ? sql`AND (m.content ILIKE ${"%" + search + "%"} OR u.email ILIKE ${"%" + search + "%"} OR u.first_name ILIKE ${"%" + search + "%"})` : sql``}
+        ORDER BY m.created_at DESC
+        LIMIT ${parseInt(limit)} OFFSET ${offset}
+      `);
+
+      res.json(results.rows.map((r: any) => ({
+        id: r.id,
+        sessionId: r.session_id,
+        senderId: r.sender_id,
+        content: r.content,
+        type: r.type,
+        fileUrl: r.file_url,
+        createdAt: r.created_at,
+        deletedAt: r.deleted_at,
+        sender: r.sender,
+        session: r.session,
+      })));
+    } catch (err) {
+      res.status(500).json({ message: "Failed to fetch messages" });
+    }
+  });
+
+  app.delete("/api/admin/messages/:id", isAdmin, async (req: any, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      await db.delete(messages).where(eq(messages.id, id));
+      await createAuditLog({ userId: req.userId, action: "admin.delete_message", entityType: "message", entityId: String(id), ipAddress: req.ip });
+      res.status(204).end();
+    } catch (err) {
+      res.status(500).json({ message: "Failed to delete message" });
+    }
+  });
+
   // ── REPORTS ────────────────────────────────────────────────
   app.get("/api/admin/reports", isAdmin, async (req: any, res) => {
     try {
@@ -342,10 +392,14 @@ export function registerAdminRoutes(app: Express) {
       const results = await db.execute(sql`
         SELECT r.*,
           json_build_object('id', rep.id, 'firstName', rep.first_name, 'lastName', rep.last_name, 'email', rep.email) AS reporter,
-          json_build_object('id', red.id, 'firstName', red.first_name, 'lastName', red.last_name, 'email', red.email) AS reported
+          json_build_object('id', red.id, 'firstName', red.first_name, 'lastName', red.last_name, 'email', red.email) AS reported,
+          CASE WHEN r.message_id IS NOT NULL THEN
+            json_build_object('id', m.id, 'content', m.content, 'type', m.type, 'deletedAt', m.deleted_at, 'createdAt', m.created_at)
+          ELSE NULL END AS reported_message
         FROM reports r
         INNER JOIN users rep ON r.reporter_id = rep.id
         INNER JOIN users red ON r.reported_id = red.id
+        LEFT JOIN messages m ON r.message_id = m.id
         ${status && status !== "all" ? sql`WHERE r.status = ${status}` : sql``}
         ORDER BY r.created_at DESC
       `);
@@ -354,12 +408,14 @@ export function registerAdminRoutes(app: Express) {
         id: r.id,
         reporterId: r.reporter_id,
         reportedId: r.reported_id,
+        messageId: r.message_id,
         reason: r.reason,
         details: r.details,
         status: r.status,
         createdAt: r.created_at,
         reporter: r.reporter,
         reported: r.reported,
+        reportedMessage: r.reported_message,
       })));
     } catch (err) {
       res.status(500).json({ message: "Failed to fetch reports" });
