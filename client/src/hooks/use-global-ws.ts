@@ -75,6 +75,10 @@ export function useGlobalRealtime(userId: string | undefined, addNotification?: 
 
             if (msg.type === "message-notification") {
               queryClient.invalidateQueries({ queryKey: [api.sessions.list.path] });
+              // Also refresh the specific session's messages so the recipient sees them immediately
+              if (msg.sessionId) {
+                queryClient.invalidateQueries({ queryKey: [api.messages.list.path, msg.sessionId] });
+              }
               addNotifRef.current?.({
                 type: "message",
                 title: msg.senderName || "New Message",

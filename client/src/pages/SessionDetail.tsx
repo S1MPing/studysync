@@ -236,7 +236,7 @@ export function SessionDetail() {
   const { data: session, isLoading: sessionLoading } = useSession(sessionId);
   const { data: messages = [] } = useMessages(sessionId);
   const sendMessage = useSendMessage();
-  const { broadcastMessage, sendTyping, partnerTyping, partnerRead } = useRealtimeMessages(sessionId, user?.id || "");
+  const { broadcastMessage, sendTyping, sendRead, partnerTyping, partnerRead } = useRealtimeMessages(sessionId, user?.id || "");
   const deleteMessage = useDeleteMessage(sessionId);
   const scheduleSession = useScheduleSession();
   const updateStatus = useUpdateSessionStatus();
@@ -300,6 +300,7 @@ export function SessionDetail() {
 
   useEffect(() => {
     if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+    if (messages.length > 0) sendRead();
   }, [messages]);
 
   // Mark session as read (for unread badge) when the user opens it

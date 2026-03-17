@@ -114,10 +114,14 @@ export function useSendMessage() {
       return res.json();
     },
     onSuccess: (newMessage, variables) => {
-      // Add message to cache immediately
+      // Add message to cache immediately (with dedup in case WS already delivered it)
       queryClient.setQueryData(
         [api.messages.list.path, variables.sessionId],
-        (old: any[] | undefined) => old ? [...old, newMessage] : [newMessage]
+        (old: any[] | undefined) => {
+          if (!old) return [newMessage];
+          if (old.some((m: any) => m.id === newMessage?.id)) return old;
+          return [...old, newMessage];
+        }
       );
     },
   });
