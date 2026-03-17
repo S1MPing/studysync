@@ -15,7 +15,7 @@ import {
   Mic, MicOff, PhoneOff, CalendarPlus, Minimize2, Maximize2, X, Check, Paperclip, Edit3, Save, Lock, Signal, PhoneCall, Monitor, MonitorOff, FileDown, CheckCheck, Pencil, Volume2, VolumeX, Smile
 } from "lucide-react";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { format } from "date-fns";
 import katex from "katex";
 import "katex/dist/katex.min.css";
@@ -181,7 +181,7 @@ function Whiteboard({ sessionId, userId }: { sessionId: number; userId: string }
   const SIZES = [2, 4, 8, 16];
 
   return (
-    <div className="flex flex-col h-full gap-2">
+    <div className="flex flex-col flex-1 min-h-0 gap-2">
       {/* Toolbar */}
       <div className="flex items-center gap-2 flex-wrap shrink-0">
         <div className="flex gap-1.5 flex-wrap">
@@ -262,6 +262,7 @@ export function SessionDetail() {
   const [recording, setRecording] = useState(false);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
+  const [activeTab, setActiveTab] = useState<"messages" | "whiteboard">("messages");
   const [showSchedule, setShowSchedule] = useState(false);
   const [scheduleDate, setScheduleDate] = useState("");
   const [scheduleTime, setScheduleTime] = useState("18:00");
@@ -887,7 +888,7 @@ export function SessionDetail() {
         </div>
 
         {/* Chat + Whiteboard Tabs */}
-        <Tabs defaultValue="messages" className="flex-1 flex flex-col overflow-hidden min-h-0 bg-card border border-border/60 rounded-xl shadow-soft">
+        <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as "messages" | "whiteboard")} className="flex-1 flex flex-col min-h-0 bg-card border border-border/60 rounded-xl shadow-soft overflow-hidden">
           <div className="px-3 pt-2 border-b border-border/40 shrink-0">
             <TabsList className="h-8 bg-transparent gap-1 p-0">
               <TabsTrigger value="messages" className="h-7 text-xs px-3 rounded-md data-[state=active]:bg-primary/10 data-[state=active]:text-primary">
@@ -899,11 +900,9 @@ export function SessionDetail() {
             </TabsList>
           </div>
 
-          {/* Absolute-fill wrapper so TabsContent reliably fills remaining height */}
-          <div className="flex-1 relative min-h-0">
-
-          <TabsContent value="messages" className="absolute inset-0 flex flex-col m-0 overflow-hidden">
-            <div ref={scrollRef} className="flex-1 overflow-y-auto px-3 py-2 space-y-1 bg-muted/5">
+          {/* Messages panel — plain div, shown/hidden via class */}
+          <div className={`flex-1 flex flex-col min-h-0${activeTab !== "messages" ? " hidden" : ""}`}>
+            <div ref={scrollRef} className="flex-1 overflow-y-auto min-h-0 px-3 py-2 space-y-1 bg-muted/5">
               {/* Session started divider */}
               <div className="flex items-center gap-2 py-3">
                 <div className="flex-1 h-px bg-border/30" />
@@ -1079,13 +1078,12 @@ export function SessionDetail() {
                 </Button>
               </form>
             </div>
-          </TabsContent>
+          </div>{/* end messages panel */}
 
-          <TabsContent value="whiteboard" className="absolute inset-0 flex flex-col m-0 p-3 overflow-hidden">
+          {/* Whiteboard panel — plain div, shown/hidden via class */}
+          <div className={`flex-1 flex flex-col min-h-0 p-3${activeTab !== "whiteboard" ? " hidden" : ""}`}>
             <Whiteboard sessionId={sessionId} userId={String(user?.id || "")} />
-          </TabsContent>
-
-          </div>{/* end absolute-fill wrapper */}
+          </div>
         </Tabs>
       </div>
     </>
