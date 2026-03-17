@@ -708,7 +708,7 @@ export function SessionDetail() {
       {renderFullCall()}
       {renderMiniCall()}
 
-      <div className="h-[calc(100vh-8rem)] md:h-[calc(100vh-6rem)] flex flex-col md:flex-row gap-4 pb-16 md:pb-0">
+      <div className="h-[calc(100vh-8rem)] md:h-[calc(100vh-6rem)] flex flex-col md:flex-row gap-4 pb-16 md:pb-0 overflow-hidden">
         {/* Desktop sidebar */}
         <div className="hidden md:flex md:w-72 flex-col gap-4 shrink-0">
           <Link href="/sessions" className="text-xs font-medium text-muted-foreground hover:text-foreground flex items-center w-fit">
@@ -899,7 +899,10 @@ export function SessionDetail() {
             </TabsList>
           </div>
 
-          <TabsContent value="messages" className="flex-1 flex flex-col overflow-hidden min-h-0 m-0">
+          {/* Absolute-fill wrapper so TabsContent reliably fills remaining height */}
+          <div className="flex-1 relative min-h-0">
+
+          <TabsContent value="messages" className="absolute inset-0 flex flex-col m-0 overflow-hidden">
             <div ref={scrollRef} className="flex-1 overflow-y-auto px-3 py-2 space-y-1 bg-muted/5">
               {/* Session started divider */}
               <div className="flex items-center gap-2 py-3">
@@ -1078,9 +1081,11 @@ export function SessionDetail() {
             </div>
           </TabsContent>
 
-          <TabsContent value="whiteboard" className="flex-1 flex flex-col overflow-hidden min-h-[400px] m-0 p-3">
+          <TabsContent value="whiteboard" className="absolute inset-0 flex flex-col m-0 p-3 overflow-hidden">
             <Whiteboard sessionId={sessionId} userId={String(user?.id || "")} />
           </TabsContent>
+
+          </div>{/* end absolute-fill wrapper */}
         </Tabs>
       </div>
     </>
