@@ -242,7 +242,7 @@ function VoiceNote({ src, isMe }: { src: string; isMe: boolean }) {
     const a = audioRef.current;
     if (!a) return;
     if (playing) { a.pause(); setPlaying(false); }
-    else { a.play(); setPlaying(true); }
+    else { a.play().then(() => setPlaying(true)).catch(() => setPlaying(false)); }
   };
 
   const handleTimeUpdate = () => {
@@ -358,6 +358,7 @@ export function SessionDetail() {
 
   const [content, setContent] = useState("");
   const [recording, setRecording] = useState(false);
+  const [recordingSecs, setRecordingSecs] = useState(0);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
   const [activeTab, setActiveTab] = useState<"messages" | "whiteboard">("messages");
@@ -579,25 +580,31 @@ export function SessionDetail() {
     }
   };
 
+  useEffect(() => {
+    if (!recording) return;
+    const interval = setInterval(() => setRecordingSecs(s => s + 1), 1000);
+    return () => clearInterval(interval);
+  }, [recording]);
+
   const handleSendVoice = async () => {
     if (!navigator.mediaDevices?.getUserMedia) return;
     if (!recording) {
       // start
       try {
         const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-        const mediaRecorder = new MediaRecorder(stream);
+        const mimeType = MediaRecorder.isTypeSupported("audio/webm;codecs=opus")
+          ? "audio/webm;codecs=opus"
+          : MediaRecorder.isTypeSupported("audio/mp4")
+          ? "audio/mp4"
+          : "audio/webm";
+        const mediaRecorder = new MediaRecorder(stream, { mimeType });
         mediaRecorderRef.current = mediaRecorder;
         chunksRef.current = [];
         mediaRecorder.ondataavailable = (event) => {
           if (event.data.size > 0) chunksRef.current.push(event.data);
         };
         mediaRecorder.onstop = async () => {
-          const mimeType = MediaRecorder.isTypeSupported("audio/webm;codecs=opus")
-            ? "audio/webm;codecs=opus"
-            : MediaRecorder.isTypeSupported("audio/mp4")
-            ? "audio/mp4"
-            : "audio/webm";
-          const blob = new Blob(chunksRef.current, { type: mimeType });
+          const blob = new Blob(chunksRef.current, { type: mediaRecorder.mimeType });
           const reader = new FileReader();
           reader.onloadend = () => {
             const base64 = reader.result as string;
@@ -608,9 +615,11 @@ export function SessionDetail() {
           };
           reader.readAsDataURL(blob);
           stream.getTracks().forEach(t => t.stop());
+          setRecordingSecs(0);
         };
         mediaRecorder.start();
         setRecording(true);
+        setRecordingSecs(0);
       } catch {
         // ignore for now
       }
@@ -1353,10 +1362,15 @@ export function SessionDetail() {
                 </Popover>
                 <Input placeholder="Type a message... (use $...$ for math)" className="flex-1 rounded-lg h-10 bg-muted/20 border-border/50 text-sm px-3.5"
                   value={content} onChange={e => { setContent(e.target.value); handleTyping(); }} />
+                {recording && (
+                  <span className="text-xs font-mono text-destructive shrink-0 min-w-[36px] text-center">
+                    {Math.floor(recordingSecs / 60)}:{String(recordingSecs % 60).padStart(2, "0")}
+                  </span>
+                )}
                 <Button
                   type="button"
                   size="icon"
-                  className={`h-10 w-10 rounded-lg shrink-0 ${recording ? "bg-destructive text-white" : ""}`}
+                  className={`h-10 w-10 rounded-lg shrink-0 ${recording ? "bg-destructive text-white animate-pulse" : ""}`}
                   onClick={handleSendVoice}
                 >
                   {recording ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4" />}

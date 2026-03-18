@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useLocation } from "wouter";
 import { useAuth } from "@/hooks/use-auth";
 import { useUpdateProfile } from "@/hooks/use-users";
 import { useAddTutorCourse, useAddAvailability } from "@/hooks/use-tutor";
@@ -77,6 +78,7 @@ function WelcomeModal({ onClose, role }: { onClose: () => void; role: string }) 
 // ── Main ──────────────────────────────────────────────────────────────────────
 export function ProfileSetup() {
   const { user } = useAuth();
+  const [, setLocation] = useLocation();
   const updateProfile = useUpdateProfile();
   const addTutorCourse = useAddTutorCourse();
   const addAvailability = useAddAvailability();
@@ -239,7 +241,7 @@ export function ProfileSetup() {
           role={role}
           onClose={() => {
             setShowWelcome(false);
-            window.location.href = "/dashboard";
+            setLocation("/dashboard");
           }}
         />
       )}

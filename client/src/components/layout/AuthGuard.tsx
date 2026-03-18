@@ -8,9 +8,10 @@ export function AuthGuard({ children }: { children: ReactNode }) {
   const [location, setLocation] = useLocation();
 
   useEffect(() => {
-    if (!isLoading && !isAuthenticated) {
+    if (isLoading) return;
+    if (!isAuthenticated) {
       setLocation("/auth");
-    } else if (user && !(user as any).isBanned && (!user.role || !user.university)) {
+    } else if (user && !(user as any).isBanned && !user.university) {
       if (location !== "/setup-profile") {
         setLocation("/setup-profile");
       }
@@ -34,7 +35,7 @@ export function AuthGuard({ children }: { children: ReactNode }) {
   if ((user as any).isBanned) return null;
 
   // Profile incomplete → show setup page if already there, otherwise useEffect redirects
-  if (!user.role || !user.university) {
+  if (!user.university) {
     if (location === "/setup-profile") return <>{children}</>;
     return null;
   }
