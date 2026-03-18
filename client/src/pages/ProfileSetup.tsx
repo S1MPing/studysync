@@ -11,7 +11,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
-import { Loader2, X, Plus, BookOpen, MessageSquare, Video, Brain, Users, CheckCircle2, Clock } from "lucide-react";
+import { Loader2, X, Plus, BookOpen, MessageSquare, Video, Brain, Users, CheckCircle2, Clock, ArrowLeft } from "lucide-react";
 
 const ALL_LEVELS = ["100", "200", "300", "400", "Masters"];
 
@@ -77,7 +77,7 @@ function WelcomeModal({ onClose, role }: { onClose: () => void; role: string }) 
 
 // ── Main ──────────────────────────────────────────────────────────────────────
 export function ProfileSetup() {
-  const { user } = useAuth();
+  const { user, logout } = useAuth();
   const [, setLocation] = useLocation();
   const updateProfile = useUpdateProfile();
   const addTutorCourse = useAddTutorCourse();
@@ -282,6 +282,13 @@ export function ProfileSetup() {
                   <Button onClick={() => setStep(2)} className="w-full h-11 rounded-lg font-semibold mt-4">
                     Continue
                   </Button>
+                  <button
+                    type="button"
+                    onClick={() => logout()}
+                    className="w-full flex items-center justify-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors mt-1"
+                  >
+                    <ArrowLeft className="w-3 h-3" /> Back to sign in
+                  </button>
                 </div>
               )}
 
